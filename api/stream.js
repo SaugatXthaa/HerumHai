@@ -889,17 +889,43 @@ async function resolveStreams(target, userConfig, baseUrl) {
     return true;
   });
 
+  // Label download streams with ⬇️ prefix for easy identification
+  // Download streams = streams with [Download] in description OR from HdHub's
+  // "Download |" source tag. These are direct file downloads (MKV/MP4) that
+  // Stremio can save locally rather than stream.
+  const labeledStreams = playableStreams.map((s) => {
+    const desc = s.description || '';
+    const name = s.name || '';
+    const isDownload = desc.includes('[Download]') || desc.includes('Download |');
+    if (isDownload && !name.includes('⬇️')) {
+      return { ...s, name: `⬇️ ${name}` };
+    }
+    return s;
+  });
+
+  // Apply downloads_only filter if requested (?downloads_only=true)
+  let finalStreams = labeledStreams;
+  if (userConfig.downloads_only) {
+    finalStreams = labeledStreams.filter((s) => {
+      const desc = s.description || '';
+      const name = s.name || '';
+      return name.includes('⬇️') || desc.includes('[Download]') || desc.includes('Download |');
+    });
+    console.log(`[scraper] downloads_only filter: ${labeledStreams.length} → ${finalStreams.length} streams`);
+  }
+
   // Dedupe by URL
   const seen = new Set();
   const unique = [];
-  for (const s of playableStreams) {
+  for (const s of finalStreams) {
     if (!seen.has(s.url)) {
       seen.add(s.url);
       unique.push(s);
     }
   }
 
-  console.log(`[scraper] total unique playable streams: ${unique.length} (in ${Date.now() - startTime}ms)`);
+  const downloadCount = unique.filter((s) => s.name?.includes('⬇️')).length;
+  console.log(`[scraper] total unique playable streams: ${unique.length} (${downloadCount} download) (in ${Date.now() - startTime}ms)`);
   return unique;
 }
 
@@ -939,7 +965,8 @@ export default async function handler(req, res) {
   const userConfig = {};
   for (const [k, v] of Object.entries(req.query || {})) {
     if (k.startsWith('source_') || k.startsWith('res_') || k.startsWith('audio_') ||
-        k === 'subtitles_disabled' || k === 'emulate_vpn' || k === 'disable_direct') {
+        k === 'subtitles_disabled' || k === 'emulate_vpn' || k === 'disable_direct' ||
+        k === 'downloads_only' || k === 'torbox' || k === 'qualities' || k === 'sort') {
       userConfig[k] = v !== 'false' && v !== '0' && v !== 'unchecked';
     }
   }
