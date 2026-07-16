@@ -157,7 +157,7 @@ export default function handler(req, res) {
       'Direct HLS/MP4 streams with signed proxy headers.',
     resources: ['stream'],
     types: ['movie', 'series', 'anime'],
-    idPrefixes: ['tt', 'kitsu'],
+    idPrefixes: ['tt', 'kitsu', 'tmdb:'],
     catalogs: [],
     logo: `${baseUrl}/logo.png`,
     config: configArray,

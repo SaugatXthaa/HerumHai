@@ -474,3 +474,16 @@ export default async function handler(req, res) {
     return res.status(200).json({ streams: [] });
   }
 }
+
+// ---------------------------------------------------------------------------
+// Exports — used by api/stream.js to merge HdHub streams into the main response
+// ----------------------------------------------------------------------------
+
+export {
+  fetchHdHubStreams,
+  rewriteHdHubStream,
+  buildHdHubConfig,
+  encodeConfig as encodeHdHubConfig,
+  parseStremioId as parseStremioIdHdHub,
+};
+

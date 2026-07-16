@@ -41,6 +41,13 @@
 
 import { createHmac, randomBytes } from 'node:crypto';
 
+// Import HdHub functions from streams2.js (merged into main stream response)
+import {
+  fetchHdHubStreams,
+  rewriteHdHubStream,
+  parseStremioIdHdHub,
+} from './streams2.js';
+
 // ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------
@@ -727,7 +734,7 @@ async function scrapeExtraSource(source, target, title) {
 
 function parseStremioId(type, rawId) {
   const clean = (rawId || '').replace(/\.json$/i, '').trim();
-  const result = { type: type || 'movie', imdbId: null, kitsuId: null, season: null, episode: null };
+  const result = { type: type || 'movie', imdbId: null, kitsuId: null, season: null, episode: null, rawId: clean };
   if (type === 'anime' || clean.startsWith('kitsu:')) {
     result.type = 'anime';
     const parts = clean.split(':');
@@ -737,6 +744,17 @@ function parseStremioId(type, rawId) {
     } else {
       result.kitsuId = parts[0] || null;
       result.episode = parts[1] ? parseInt(parts[1], 10) || 1 : 1;
+    }
+    return result;
+  }
+  if (clean.startsWith('tmdb:')) {
+    // TMDB ID support — pass through to HdHub (PenguPlay doesn't support tmdb:)
+    result.imdbId = clean;  // use as fallback ID
+    result.tmdbId = clean;
+    if (type === 'series') {
+      const parts = clean.split(':');
+      result.season = parts[2] ? parseInt(parts[2], 10) || null : null;
+      result.episode = parts[3] ? parseInt(parts[3], 10) || null : null;
     }
     return result;
   }
@@ -790,15 +808,39 @@ async function resolveStreams(target, userConfig, baseUrl) {
     return s.type === 'movie_series' || s.type === 'embed';
   });
 
-  // Start PenguPlay fetch + all extra scrapers IN PARALLEL
-  console.log(`[scraper] starting PenguPlay + ${extraCandidates.length} extra sources in parallel`);
+  // Start ALL THREE in parallel: PenguPlay + HdHub + 24 extra scrapers
+  console.log(`[scraper] starting PenguPlay + HdHub + ${extraCandidates.length} extra sources in parallel`);
 
+  // 1. PenguPlay proxy (returns 21+ streams in ~1s)
   const penguPromise = fetchPenguStreams(target, userConfig).then((streams) => {
     console.log(`[pengu] returned ${streams.length} streams in ${Date.now() - startTime}ms`);
     return streams;
+  }).catch((e) => {
+    console.log(`[pengu] failed (graceful degradation): ${e.message}`);
+    return [];
   });
 
-  // Wrap each extra source with a hard timeout
+  // 2. HdHub proxy (returns 50+ streams in ~1s) — NEW, merged in
+  //    HdHub supports tmdb: IDs too, so parse the raw ID with its parser
+  const hdhubTarget = parseStremioIdHdHub(target.type, target.imdbId || target.kitsuId || '');
+  if (target.season != null) hdhubTarget.season = target.season;
+  if (target.episode != null) hdhubTarget.episode = target.episode;
+  // Preserve tmdb: prefix if the original ID had it
+  if (target.rawId && target.rawId.startsWith('tmdb:')) {
+    hdhubTarget.tmdbId = target.rawId;
+  }
+  const hdhubPromise = fetchHdHubStreams(hdhubTarget, userConfig).then((streams) => {
+    console.log(`[hdhub] returned ${streams.length} streams in ${Date.now() - startTime}ms`);
+    // Rewrite each HdHub stream URL to our signed /direct/ proxy
+    return streams
+      .map((s) => rewriteHdHubStream(s, baseUrl))
+      .filter(Boolean);  // remove nulls (broken streams)
+  }).catch((e) => {
+    console.log(`[hdhub] failed (graceful degradation): ${e.message}`);
+    return [];
+  });
+
+  // 3. Extra source scrapers (24 sources, browser fallback for CF)
   const extraPromises = extraCandidates.map((source) =>
     Promise.race([
       scrapeExtraSource(source, target, title),
@@ -809,8 +851,8 @@ async function resolveStreams(target, userConfig, baseUrl) {
     ])
   );
 
-  // Wait for PenguPlay + give extra sources up to EXTRA_TOTAL_BUDGET_MS
-  const penguStreams = await penguPromise;
+  // Wait for all three in parallel
+  const [penguStreams, hdhubStreams] = await Promise.all([penguPromise, hdhubPromise]);
 
   // Wait for extra sources (with total budget)
   const extraBudgetTimer = new Promise((resolve) => setTimeout(resolve, EXTRA_TOTAL_BUDGET_MS));
@@ -825,9 +867,10 @@ async function resolveStreams(target, userConfig, baseUrl) {
   const extraStreams = (await Promise.all(extraResults)).flat();
   console.log(`[scraper] extra sources returned ${extraStreams.length} streams in ${Date.now() - startTime}ms`);
 
-  // Merge: PenguPlay (rewritten) + extra streams
+  // Merge: PenguPlay (rewritten) + HdHub (already rewritten) + extra streams
   const rewrittenPengu = penguStreams.map((s) => rewritePenguStream(s, baseUrl));
-  const allStreams = [...rewrittenPengu, ...extraStreams];
+  const allStreams = [...rewrittenPengu, ...hdhubStreams, ...extraStreams];
+  console.log(`[scraper] merged: ${rewrittenPengu.length} pengu + ${hdhubStreams.length} hdhub + ${extraStreams.length} extra = ${allStreams.length} total`);
 
   // FILTER OUT:
   //   - Donation banners (streams with externalUrl instead of url)
