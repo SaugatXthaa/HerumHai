@@ -1,26 +1,22 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "version": 2,
-  "cleanUrls": true,
+  "cleanUrls": false,
   "trailingSlash": false,
   "rewrites": [
-    { "source": "/manifest.json", "destination": "/api/manifest.js" },
-    { "source": "/manifest", "destination": "/api/manifest.js" },
-    { "source": "/api/manifest", "destination": "/api/manifest.js" },
-    { "source": "/api/manifest.json", "destination": "/api/manifest.js" },
+    { "source": "/manifest.json", "destination": "/api/manifest" },
+    { "source": "/manifest", "destination": "/api/manifest" },
+    { "source": "/api/manifest.json", "destination": "/api/manifest" },
 
-    { "source": "/stream/:type/:id.json", "destination": "/api/stream.js?type=:type&id=:id" },
-    { "source": "/stream/:type/:id", "destination": "/api/stream.js?type=:type&id=:id" },
-    { "source": "/api/stream/:type/:id.json", "destination": "/api/stream.js?type=:type&id=:id" },
-    { "source": "/api/stream/:type/:id", "destination": "/api/stream.js?type=:type&id=:id" },
+    { "source": "/stream/:type/:id.json", "destination": "/api/stream?type=:type&id=:id" },
+    { "source": "/stream/:type/:id", "destination": "/api/stream?type=:type&id=:id" },
+    { "source": "/api/stream/:type/:id.json", "destination": "/api/stream?type=:type&id=:id" },
+    { "source": "/api/stream/:type/:id", "destination": "/api/stream?type=:type&id=:id" },
 
-    { "source": "/direct/:source/:token/:filename(.+)", "destination": "/api/direct.js" },
-    { "source": "/api/direct/:source/:token/:filename(.+)", "destination": "/api/direct.js" },
+    { "source": "/direct/:source/:token/:filename(.+)", "destination": "/api/direct" },
+    { "source": "/api/direct/:source/:token/:filename(.+)", "destination": "/api/direct" },
 
-    { "source": "/:config/manifest.json", "destination": "/api/manifest.js" },
-    { "source": "/:config/manifest", "destination": "/api/manifest.js" },
-
-    { "source": "/health", "destination": "/api/health.js" }
+    { "source": "/health", "destination": "/api/health" }
   ],
   "functions": {
     "api/stream.js": {
@@ -42,23 +38,7 @@
   },
   "headers": [
     {
-      "source": "/api/(.*)",
-      "headers": [
-        { "key": "Access-Control-Allow-Origin", "value": "*" },
-        { "key": "Access-Control-Allow-Methods", "value": "GET, OPTIONS" },
-        { "key": "Access-Control-Allow-Headers", "value": "Content-Type" },
-        { "key": "Cache-Control", "value": "no-store" }
-      ]
-    },
-    {
-      "source": "/manifest.json",
-      "headers": [
-        { "key": "Access-Control-Allow-Origin", "value": "*" },
-        { "key": "Cache-Control", "value": "public, max-age=3600" }
-      ]
-    },
-    {
-      "source": "/direct/(.*)",
+      "source": "/(.*)",
       "headers": [
         { "key": "Access-Control-Allow-Origin", "value": "*" },
         { "key": "Access-Control-Allow-Methods", "value": "GET, HEAD, OPTIONS" },
