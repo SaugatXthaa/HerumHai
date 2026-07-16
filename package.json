@@ -2,6 +2,7 @@
   "name": "herumhai",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "description": "HerumHai — Real-time Stremio/Nuvio stream addon optimized for Vercel Serverless Deployment.",
   "dependencies": {
     "@sparticuz/chromium": "^127.0.0",

@@ -151,8 +151,9 @@ export default function handler(req, res) {
     version: '1.0.0',
     name: 'HerumHai',
     description:
-      'HerumHai — Real-time serverless stream resolver with anti-decoy filtering. ' +
-      'Searches 16 PenguPlay-style indexers + 6 embed sources in real time. ' +
+      'HerumHai — Real-time stream resolver proxying 16 PenguPlay sources ' +
+      '(4KHDHub, MovieBox, MoviesDrives, VAPlayer, Videasy, ZXCStream, Aether, ' +
+      'Artemis, VidLink, VidFast, HDGharTV, CineFreak, Aniwaves, AnimeSuge, MKVBase, 111477). ' +
       'Direct HLS/MP4 streams with signed proxy headers.',
     resources: ['stream'],
     types: ['movie', 'series', 'anime'],
