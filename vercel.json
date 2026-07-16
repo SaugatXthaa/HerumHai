@@ -13,6 +13,11 @@
     { "source": "/api/stream/:type/:id.json", "destination": "/api/stream?type=:type&id=:id" },
     { "source": "/api/stream/:type/:id", "destination": "/api/stream?type=:type&id=:id" },
 
+    { "source": "/streams2/:type/:id.json", "destination": "/api/streams2?type=:type&id=:id" },
+    { "source": "/streams2/:type/:id", "destination": "/api/streams2?type=:type&id=:id" },
+    { "source": "/api/streams2/:type/:id.json", "destination": "/api/streams2?type=:type&id=:id" },
+    { "source": "/api/streams2/:type/:id", "destination": "/api/streams2?type=:type&id=:id" },
+
     { "source": "/direct/:source/:token/:filename(.+)", "destination": "/api/direct" },
     { "source": "/api/direct/:source/:token/:filename(.+)", "destination": "/api/direct" },
 
@@ -20,6 +25,10 @@
   ],
   "functions": {
     "api/stream.js": {
+      "memory": 2048,
+      "maxDuration": 120
+    },
+    "api/streams2.js": {
       "memory": 2048,
       "maxDuration": 120
     },
