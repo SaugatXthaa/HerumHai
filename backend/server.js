@@ -27,6 +27,19 @@ app.use(cors({ origin: '*' }));
 app.use(express.json());
 
 // ---------------------------------------------------------------------------
+// Root endpoint — responds to / so cron-job.org health checks work
+// ---------------------------------------------------------------------------
+app.get('/', (req, res) => {
+  res.json({
+    ok: true,
+    service: 'herumhai-backend',
+    version: '1.0.0',
+    ts: new Date().toISOString(),
+    endpoints: ['/health', '/stream/:type/:id.json', '/api/stream'],
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Health check
 // ---------------------------------------------------------------------------
 app.get('/health', (req, res) => {
