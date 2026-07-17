@@ -73,6 +73,59 @@ const USER_AGENT =
 
 const MIN_MP4_SIZE_BYTES = 50 * 1024 * 1024;
 
+// ---------------------------------------------------------------------------
+// Caching Layer (Upstash Redis)
+// ----------------------------------------------------------------------------
+// When PenguPlay or HdHub go down, we serve streams from cache.
+// Cache key: stream:{type}:{id}  →  JSON array of streams
+// TTL: 24 hours (streams are re-fetched fresh after that)
+//
+// Set UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN env vars in Vercel.
+// If not set, caching is disabled (graceful fallback — we just don't cache).
+// ----------------------------------------------------------------------------
+
+const CACHE_TTL_SECONDS = 24 * 60 * 60;  // 24 hours
+
+async function cacheGet(key) {
+  const url = process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  if (!url || !token) return null;
+  try {
+    const res = await fetch(`${url}/get/${encodeURIComponent(key)}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data.result) {
+      return JSON.parse(data.result);
+    }
+    return null;
+  } catch (e) {
+    console.log(`[cache] get failed: ${e.message}`);
+    return null;
+  }
+}
+
+async function cacheSet(key, value) {
+  const url = process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  if (!url || !token) return;
+  try {
+    await fetch(`${url}/set/${encodeURIComponent(key)}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ value: JSON.stringify(value), ex: CACHE_TTL_SECONDS }),
+      signal: AbortSignal.timeout(3000),
+    });
+  } catch (e) {
+    console.log(`[cache] set failed: ${e.message}`);
+  }
+}
+
 // HubCloud domain rotation
 const HUBCLOUD_DOMAINS = ['hubcloud.cx', 'hubcloud.ist', 'hubcloud.club', 'hubcloud.fans'];
 
@@ -835,12 +888,136 @@ function setBaseUrl(url) { _baseUrlRef = url; }
 function getBaseUrlRef() { return _baseUrlRef || 'https://herum-hai.vercel.app'; }
 
 // ---------------------------------------------------------------------------
+// Bespoke Scrapers — PenguPlay-style per-source implementations
+// ----------------------------------------------------------------------------
+// Each scraper knows exactly how to find streams for its source.
+// These run INDEPENDENTLY of PenguPlay/HdHub — if those go down, these still work.
+// ----------------------------------------------------------------------------
+
+/**
+ * VidSrc bespoke scraper
+ * Pattern: vidsrc.win/embed/movie/{imdb} → iframe chain → .m3u8 / .mp4
+ * Uses browser network interception (same as PenguPlay's technique)
+ */
+async function scrapeVidSrc(target) {
+  const embedUrl = target.type === 'series'
+    ? `https://vidsrc.win/embed/tv/${target.imdbId}/${target.season}/${target.episode}`
+    : `https://vidsrc.win/embed/movie/${target.imdbId}`;
+  console.log(`  [bespoke:vidsrc] → ${embedUrl.slice(0, 80)}`);
+  return browserScrapeStreams(embedUrl, { referer: 'https://vidsrc.win/' });
+}
+
+/**
+ * 2Embed bespoke scraper
+ * Pattern: 2embed.to/embed/{imdb} → iframe → .m3u8 / .mp4
+ */
+async function scrape2Embed(target) {
+  const embedUrl = target.type === 'series'
+    ? `https://www.2embed.to/embed/tv/${target.imdbId}/${target.season}/${target.episode}`
+    : `https://www.2embed.to/embed/${target.imdbId}`;
+  console.log(`  [bespoke:2embed] → ${embedUrl.slice(0, 80)}`);
+  return browserScrapeStreams(embedUrl, { referer: 'https://www.2embed.to/' });
+}
+
+/**
+ * AnimeFlix bespoke scraper
+ * Pattern: animeflix.dad/search?q={title} → detail → .m3u8 HLS
+ */
+async function scrapeAnimeFlix(target, title) {
+  if (!title) return [];
+  const searchUrl = `https://animeflix.dad/search?q=${encodeURIComponent(title)}`;
+  console.log(`  [bespoke:animeflix] → ${searchUrl.slice(0, 80)}`);
+  // Search → find detail → scrape streams
+  const searchHtml = await fetchHtmlWithBrowserFallback(searchUrl, { timeout: 12_000 });
+  if (!searchHtml.body) return [];
+  // Find first anime detail link
+  const detailMatch = searchHtml.body.match(/href="(\/(?:anime|watch|series)\/[^"]+)"/i);
+  if (!detailMatch) return [];
+  const detailUrl = `https://animeflix.dad${detailMatch[1]}`;
+  console.log(`  [bespoke:animeflix] → detail: ${detailUrl.slice(0, 80)}`);
+  return browserScrapeStreams(detailUrl, { referer: searchUrl });
+}
+
+/**
+ * VidSrc.me bespoke scraper
+ * Pattern: vidsrc.me/embed/{imdb}/ → direct .mp4 / .m3u8
+ */
+async function scrapeVidSrcMe(target) {
+  const embedUrl = `https://vidsrc.me/embed/${target.imdbId}/`;
+  console.log(`  [bespoke:vidsrcme] → ${embedUrl.slice(0, 80)}`);
+  return browserScrapeStreams(embedUrl, { referer: 'https://vidsrc.me/' });
+}
+
+/**
+ * Gomo bespoke scraper
+ * Pattern: gomo.to/embed/movie/{imdb} → iframe → .m3u8
+ */
+async function scrapeGomo(target) {
+  const embedUrl = `https://gomo.to/embed/movie/${target.imdbId}`;
+  console.log(`  [bespoke:gomo] → ${embedUrl.slice(0, 80)}`);
+  return browserScrapeStreams(embedUrl, { referer: 'https://gomo.to/' });
+}
+
+// ---------------------------------------------------------------------------
 // Per-Source Scraper (HubCloud + direct stream extraction)
 // ---------------------------------------------------------------------------
 
 async function scrapeExtraSource(source, target, title) {
   const query = title || target.imdbId || target.kitsuId;
   if (!query) return [];
+
+  // Route to bespoke scrapers first (PenguPlay-style per-source implementations)
+  // These run INDEPENDENTLY of PenguPlay/HdHub — they work even if those are down
+  if (source.slug === 'vidsrc') {
+    const captured = await scrapeVidSrc(target);
+    if (captured.length > 0) {
+      return captured.slice(0, 3).map((cap, i) => buildExtraStream({
+        source, title, filename: '', fileSize: cap.size || 0,
+        directUrl: cap.url, cdn: 'vidsrc', referer: cap.headers.referer || '',
+        cookie: cap.headers.cookie || '', index: i + 1,
+      }));
+    }
+  }
+  if (source.slug === '2embed') {
+    const captured = await scrape2Embed(target);
+    if (captured.length > 0) {
+      return captured.slice(0, 3).map((cap, i) => buildExtraStream({
+        source, title, filename: '', fileSize: cap.size || 0,
+        directUrl: cap.url, cdn: '2embed', referer: cap.headers.referer || '',
+        cookie: cap.headers.cookie || '', index: i + 1,
+      }));
+    }
+  }
+  if (source.slug === 'animeflix' && target.type === 'anime') {
+    const captured = await scrapeAnimeFlix(target, title);
+    if (captured.length > 0) {
+      return captured.slice(0, 3).map((cap, i) => buildExtraStream({
+        source, title, filename: '', fileSize: cap.size || 0,
+        directUrl: cap.url, cdn: 'animeflix', referer: cap.headers.referer || '',
+        cookie: cap.headers.cookie || '', index: i + 1,
+      }));
+    }
+  }
+  if (source.slug === 'vidsrcme') {
+    const captured = await scrapeVidSrcMe(target);
+    if (captured.length > 0) {
+      return captured.slice(0, 3).map((cap, i) => buildExtraStream({
+        source, title, filename: '', fileSize: cap.size || 0,
+        directUrl: cap.url, cdn: 'vidsrcme', referer: cap.headers.referer || '',
+        cookie: cap.headers.cookie || '', index: i + 1,
+      }));
+    }
+  }
+  if (source.slug === 'gomo') {
+    const captured = await scrapeGomo(target);
+    if (captured.length > 0) {
+      return captured.slice(0, 3).map((cap, i) => buildExtraStream({
+        source, title, filename: '', fileSize: cap.size || 0,
+        directUrl: cap.url, cdn: 'gomo', referer: cap.headers.referer || '',
+        cookie: cap.headers.cookie || '', index: i + 1,
+      }));
+    }
+  }
 
   let searchUrl;
   if (source.type === 'embed') {
@@ -1240,11 +1417,44 @@ export default async function handler(req, res) {
   const target = parseStremioId(parsedType, parsedId);
   console.log(`\n[/api/stream] ${parsedType}/${parsedId} →`, JSON.stringify(target));
 
+  // Check cache first — if we have a recent result, serve it instantly.
+  // This is our fallback when PenguPlay/HdHub are down.
+  const cacheKey = `stream:${parsedType}:${parsedId}`;
+  const cached = await cacheGet(cacheKey);
+  if (cached && Array.isArray(cached) && cached.length > 0) {
+    console.log(`[cache] HIT — serving ${cached.length} streams from cache`);
+    // Rewrite cached URLs to use current baseUrl (in case deployment URL changed)
+    const rewrittenCached = cached.map((s) => {
+      if (!s.url) return s;
+      // URLs already point to /direct/ — just replace the host
+      try {
+        const url = new URL(s.url);
+        return { ...s, url: `${baseUrl}${url.pathname}${url.search}` };
+      } catch { return s; }
+    });
+    return res.status(200).json({ streams: rewrittenCached });
+  }
+  console.log(`[cache] MISS — fetching fresh streams`);
+
   try {
     const streams = await resolveStreams(target, userConfig, baseUrl);
+
+    // Cache the result (non-blocking) — but only if we got streams
+    if (streams.length > 0) {
+      cacheSet(cacheKey, streams).catch(() => {});
+      console.log(`[cache] stored ${streams.length} streams for ${cacheKey}`);
+    }
+
     return res.status(200).json({ streams });
   } catch (e) {
     console.error(`[/api/stream] fatal: ${e.message}`);
+    // Last resort: try cache even if it was a MISS earlier (might have been
+    // populated by a parallel request)
+    const emergencyCache = await cacheGet(cacheKey);
+    if (emergencyCache && emergencyCache.length > 0) {
+      console.log(`[cache] EMERGENCY — serving ${emergencyCache.length} streams from cache after error`);
+      return res.status(200).json({ streams: emergencyCache });
+    }
     return res.status(200).json({ streams: [] });
   }
 }

@@ -1,0 +1,26 @@
+{
+  "name": "herumhai-backend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "HerumHai Backend — dedicated scraping service (clones PenguPlay architecture)",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "scrape": "node scraper.js",
+    "db:setup": "node -e \"import('pg').then(async pg => { const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL }); const fs = await import('fs'); await pool.query(fs.readFileSync('schema.sql', 'utf-8')); console.log('Schema created'); await pool.end(); })\"",
+    "cron": "node scraper.js --cron"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "pg": "^8.13.0",
+    "node-cron": "^3.0.3",
+    "axios": "^1.7.7",
+    "cheerio": "^1.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
