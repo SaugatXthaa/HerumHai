@@ -30,11 +30,14 @@ app.use(express.json());
 // Root endpoint — responds to / so cron-job.org health checks work
 // ---------------------------------------------------------------------------
 app.get('/', (req, res) => {
+  const dbUrl = process.env.DATABASE_URL || '';
+  const dbValid = dbUrl.startsWith('postgresql://') || dbUrl.startsWith('postgres://');
   res.json({
     ok: true,
     service: 'herumhai-backend',
     version: '1.0.0',
     ts: new Date().toISOString(),
+    database: dbValid ? 'configured' : (dbUrl ? 'INVALID — must start with postgresql://' : 'not-configured'),
     endpoints: ['/health', '/stream/:type/:id.json', '/api/stream'],
   });
 });
@@ -44,12 +47,15 @@ app.get('/', (req, res) => {
 // ---------------------------------------------------------------------------
 app.get('/health', (req, res) => {
   const sources = getSourceList();
+  const dbUrl = process.env.DATABASE_URL || '';
+  const dbValid = dbUrl.startsWith('postgresql://') || dbUrl.startsWith('postgres://');
   res.json({
     ok: true,
     service: 'herumhai-backend',
     version: '1.0.0',
     ts: new Date().toISOString(),
-    database: process.env.DATABASE_URL ? 'configured' : 'not-configured',
+    database: dbValid ? 'configured' : (dbUrl ? 'INVALID — must start with postgresql://' : 'not-configured'),
+    databaseHint: dbValid ? null : 'Set DATABASE_URL to a full PostgreSQL connection string (e.g., postgresql://user:pass@host:5432/dbname)',
     clonedSources: sources.length,
     sourceList: sources.map(s => s.slug),
     independence: 'full — works without PenguPlay/HdHub',
@@ -157,24 +163,49 @@ app.post('/scrape/:type/:id', async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// Cron job — background scrape every 6 hours
+// Cron job — background scrape every 6 hours (only if DB is reachable)
 // ---------------------------------------------------------------------------
-if (process.env.DATABASE_URL) {
-  // Seed popular titles on startup
-  setTimeout(() => seedPopularTitles().catch(console.error), 5000);
+async function testDatabaseConnection() {
+  const { getPool } = await import('./db.js');
+  const p = getPool();
+  if (!p) return false;
+  try {
+    const client = await p.connect();
+    await client.query('SELECT 1');
+    client.release();
+    console.log('[db] ✓ Connection test passed');
+    return true;
+  } catch (e) {
+    console.error(`[db] ✗ Connection test FAILED: ${e.message}`);
+    console.error('[db] The backend will continue running without caching.');
+    console.error('[db] Check your DATABASE_URL — make sure it\'s a valid PostgreSQL URL');
+    console.error('[db] and the database is accessible from Render (IPv4, not IPv6)');
+    return false;
+  }
+}
 
-  // Run background scrape every 6 hours
-  cron.schedule('0 */6 * * *', () => {
-    console.log(`[cron] triggering background scrape at ${new Date().toISOString()}`);
-    runBackgroundScrape().catch(console.error);
+const dbUrl = process.env.DATABASE_URL || '';
+const dbValid = dbUrl.startsWith('postgresql://') || dbUrl.startsWith('postgres://');
+
+if (dbValid) {
+  // Test connection on startup
+  testDatabaseConnection().then((connected) => {
+    if (connected) {
+      // Seed popular titles
+      setTimeout(() => seedPopularTitles().catch(console.error), 5000);
+      // Run background scrape every 6 hours
+      cron.schedule('0 */6 * * *', () => {
+        console.log(`[cron] triggering background scrape at ${new Date().toISOString()}`);
+        runBackgroundScrape().catch(console.error);
+      });
+      // Run once 30s after startup
+      setTimeout(() => runBackgroundScrape().catch(console.error), 30000);
+      console.log('[cron] background scraper scheduled (every 6 hours)');
+    }
   });
-
-  // Also run once 30 seconds after startup
-  setTimeout(() => runBackgroundScrape().catch(console.error), 30000);
-
-  console.log('[cron] background scraper scheduled (every 6 hours)');
 } else {
-  console.log('[cron] DATABASE_URL not set — background scraper disabled');
+  console.log('[cron] DATABASE_URL not set or invalid — background scraper disabled');
+  console.log('[cron] Backend will run in no-cache mode (still works, just slower on repeat requests)');
 }
 
 // ---------------------------------------------------------------------------
@@ -184,7 +215,7 @@ app.listen(PORT, () => {
   console.log(`\n=====================================================`);
   console.log(`  HerumHai Backend v1.0.0`);
   console.log(`  Listening on http://0.0.0.0:${PORT}`);
-  console.log(`  Database: ${process.env.DATABASE_URL ? 'configured' : 'NOT configured'}`);
+  console.log(`  Database: ${dbValid ? 'configured' : 'NOT configured (no-cache mode)'}`);
   console.log(`  TMDB API: ${process.env.TMDB_API_KEY ? 'configured' : 'not configured'}`);
   console.log(`=====================================================\n`);
 });

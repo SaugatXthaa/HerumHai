@@ -9,19 +9,44 @@ let pool = null;
 
 export function getPool() {
   if (pool) return pool;
-  if (!process.env.DATABASE_URL) {
-    console.error('[db] DATABASE_URL not set');
+  const url = process.env.DATABASE_URL;
+  if (!url) {
+    console.error('[db] DATABASE_URL not set — caching disabled');
     return null;
   }
-  pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-    max: 10,
-    idleTimeoutMillis: 30_000,
-    connectionTimeoutMillis: 10_000,
-    ssl: /supabase|neon|render|railway|upstash/i.test(process.env.DATABASE_URL)
-      ? { rejectUnauthorized: false }
-      : undefined,
-  });
+  // Validate URL format — must start with postgresql:// or postgres://
+  if (!url.startsWith('postgresql://') && !url.startsWith('postgres://')) {
+    console.error('[db] DATABASE_URL is invalid — must start with postgresql:// or postgres://');
+    console.error(`[db] Got: "${url.slice(0, 50)}..."`);
+    console.error('[db] Get a valid URL from: Render → PostgreSQL → External Database URL');
+    console.error('[db] Or from Supabase: Settings → Database → Connection string → URI');
+    return null;
+  }
+  try {
+    // Parse URL to extract host for IPv4 resolution
+    const parsed = new URL(url);
+    const host = parsed.hostname;
+    console.log(`[db] Connecting to: ${host}:5432`);
+
+    pool = new Pool({
+      connectionString: url,
+      max: 5,
+      idleTimeoutMillis: 30_000,
+      connectionTimeoutMillis: 15_000,
+      // SSL for cloud providers
+      ssl: /supabase|neon|render|railway|upstash/i.test(url)
+        ? { rejectUnauthorized: false }
+        : undefined,
+      // Force IPv4 (Render free tier doesn't support IPv6 outbound)
+      // This prevents "connect ENETUNREACH" errors with IPv6 hosts
+      host: host,
+      port: parseInt(parsed.port) || 5432,
+    });
+    console.log(`[db] PostgreSQL pool created for ${host}`);
+  } catch (e) {
+    console.error(`[db] Failed to create pool: ${e.message}`);
+    return null;
+  }
   return pool;
 }
 
