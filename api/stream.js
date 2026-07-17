@@ -165,6 +165,67 @@ function encodeConfig(config) {
 }
 
 // ---------------------------------------------------------------------------
+// PenguPlay Auto-Discovery — fetches PenguPlay's manifest and detects new sources
+// If PenguPlay adds a new source, we automatically support it via the proxy.
+// This runs once per request (cached for 5 minutes via _penguSourcesCache).
+// ----------------------------------------------------------------------------
+
+let _penguSourcesCache = null;
+let _penguSourcesCacheTime = 0;
+const PENGU_CACHE_TTL_MS = 5 * 60 * 1000;  // 5 minutes
+
+async function getDiscoveredPenguSources() {
+  // Return cached if fresh
+  if (_penguSourcesCache && Date.now() - _penguSourcesCacheTime < PENGU_CACHE_TTL_MS) {
+    return _penguSourcesCache;
+  }
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10_000);
+    const res = await fetch(`${PENGU_UPSTREAM}/manifest.json`, {
+      headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' },
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+
+    if (!res.ok) {
+      console.log(`[auto-discover] PenguPlay manifest returned ${res.status}`);
+      return _penguSourcesCache || [];
+    }
+
+    const data = await res.json();
+    const configItems = data.config || [];
+    const sources = configItems
+      .filter((c) => c.key && c.key.startsWith('source_'))
+      .map((c) => ({
+        key: c.key,
+        slug: c.key.replace('source_', ''),
+        name: c.title,
+        defaultEnabled: c.default === 'checked',
+      }));
+
+    // Check for new sources we don't know about
+    const knownSlugs = new Set(ALL_PENGUPLAY_SOURCE_KEYS.map((k) => k.replace('source_', '')));
+    const newSources = sources.filter((s) => !knownSlugs.has(s.slug));
+
+    if (newSources.length > 0) {
+      console.log(`[auto-discover] ✨ Found ${newSources.length} NEW PenguPlay source(s):`);
+      for (const s of newSources) {
+        console.log(`[auto-discover]   + ${s.slug} (${s.name}) — auto-enabled via proxy`);
+      }
+    }
+
+    _penguSourcesCache = sources;
+    _penguSourcesCacheTime = Date.now();
+    return sources;
+  } catch (e) {
+    console.log(`[auto-discover] failed: ${e.message}`);
+    return _penguSourcesCache || [];
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Extra Sources Registry — 24+ sources NOT in PenguPlay
 // ---------------------------------------------------------------------------
 
@@ -302,6 +363,153 @@ async function browserFetchHtml(url, { referer, timeout = 25_000 } = {}) {
 }
 
 /**
+ * Browser Network Interception Scraper — PenguPlay's actual scraping technique.
+ *
+ * Instead of parsing HTML (which misses JS-loaded streams), this function:
+ *   1. Launches stealth Chromium (same config as PenguPlay)
+ *   2. Captures ALL network requests for .m3u8/.mp4/.ts/.mkv URLs
+ *   3. Navigates: search page → detail page → click play
+ *   4. Waits for video player to initialize and request stream segments
+ *   5. Returns captured stream URLs with their request headers
+ *
+ * This is the ONLY reliable way to extract streams from sites that use
+ * JS-loaded embed players (vidsrc, 2embed, animeflix, etc.)
+ */
+async function browserScrapeStreams(url, { referer, timeout = 20_000 } = {}) {
+  const browser = await getBrowser();
+  if (!browser) return [];
+
+  const page = await browser.newPage();
+  await page.setUserAgent(USER_AGENT);
+  await page.setExtraHTTPHeaders({ 'Accept-Language': 'en-US,en;q=0.9' });
+
+  // PenguPlay's anti-bot stack
+  await page.evaluateOnNewDocument(() => {
+    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+    window.chrome = { runtime: {} };
+    Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+    Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+  });
+
+  // Capture stream URLs from network traffic (PenguPlay's core technique)
+  const capturedStreams = [];
+  const seenUrls = new Set();
+
+  // Enable response interception to capture stream URLs
+  page.on('response', (response) => {
+    try {
+      const reqUrl = response.url();
+      if (!reqUrl || !reqUrl.startsWith('http')) return;
+
+      // Honeypot filter
+      if (HONEYPOT_REGEX.test(reqUrl)) return;
+      if (/\/cdn-cgi\//.test(reqUrl)) return;
+      if (/\/embed\/(?:movie|tv|anime)\//.test(reqUrl)) return;
+
+      const ct = (response.headers()['content-type'] || '').toLowerCase();
+      const rtype = response.request().resourceType();
+      if (['script', 'stylesheet', 'image', 'font'].includes(rtype)) return;
+
+      // Check for stream URLs (same patterns as PenguPlay)
+      const isMediaCT = /mpegurl|dash\+xml|mp2t|video\/mp4|video\/webm/.test(ct);
+      const isMediaURL = STREAM_REGEX.test(reqUrl);
+      const isHost = HOST_DOMAINS.some((d) => reqUrl.toLowerCase().includes(d));
+
+      if (!isMediaCT && !isMediaURL && !isHost) return;
+
+      // Size gate for MP4s
+      if (reqUrl.toLowerCase().includes('.mp4') || ct === 'video/mp4') {
+        const cl = parseInt(response.headers()['content-length'] || '0', 10);
+        if (cl && cl < MIN_MP4_SIZE_BYTES) return;
+      }
+
+      if (!seenUrls.has(reqUrl)) {
+        seenUrls.add(reqUrl);
+        const reqHeaders = response.request().headers();
+        capturedStreams.push({
+          url: reqUrl,
+          headers: reqHeaders,
+          contentType: ct,
+          size: parseInt(response.headers()['content-length'] || '0', 10),
+        });
+        console.log(`    [net-capture] ${ct.slice(0, 30).padEnd(30)} ${reqUrl.slice(0, 100)}`);
+      }
+    } catch {}
+  });
+
+  // Block ad/tracker domains
+  await page.setRequestInterception(true);
+  page.on('request', (req) => {
+    const u = req.url();
+    if (BLOCK_DOMAINS.some((d) => u.includes(d))) req.abort();
+    else req.continue();
+  });
+
+  try {
+    if (referer) {
+      await page.setExtraHTTPHeaders({ 'Accept-Language': 'en-US,en;q=0.9', Referer: referer });
+    }
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 40_000 });
+
+    // 6-second CF Turnstile pause (same as PenguPlay)
+    await new Promise((r) => setTimeout(r, CLOUDFLARE_PAUSE_MS));
+
+    const title = await page.title().catch(() => '');
+    if (/just a moment|cloudflare|attention required/i.test(title)) {
+      console.log(`  [browser-scrape] CF challenge — waiting 8 more seconds`);
+      await new Promise((r) => setTimeout(r, 8000));
+    }
+
+    // Try clicking play button (search in main page + all iframes)
+    const playSelectors = [
+      'button.vjs-big-play-button', '.vjs-big-play-button',
+      '.jw-icon-display', '.jw-display-icon-container',
+      '.plyr__control--overlaid', '.play-button', '.play_btn', '.playbtn',
+      "button[aria-label*='Play']", 'video',
+    ];
+    for (const sel of playSelectors) {
+      try {
+        const el = await page.$(sel);
+        if (el) {
+          await el.click({ delay: 50 });
+          console.log(`  [browser-scrape] clicked: ${sel}`);
+          break;
+        }
+      } catch {}
+    }
+
+    // Try clicking play in iframes
+    for (const frame of page.frames()) {
+      if (frame === page.mainFrame()) continue;
+      for (const sel of playSelectors) {
+        try {
+          const el = await frame.$(sel);
+          if (el) {
+            await el.click({ delay: 50 });
+            console.log(`  [browser-scrape] clicked iframe: ${sel}`);
+            break;
+          }
+        } catch {}
+      }
+    }
+
+    // Wait for streams to appear in network traffic
+    for (let i = 0; i < 4; i++) {
+      await new Promise((r) => setTimeout(r, 5000));
+      if (capturedStreams.length > 0) break;
+    }
+
+    console.log(`  [browser-scrape] captured ${capturedStreams.length} streams from network`);
+    return capturedStreams;
+  } catch (e) {
+    console.log(`  [browser-scrape] failed: ${e.message}`);
+    return capturedStreams;
+  } finally {
+    await page.close().catch(() => {});
+  }
+}
+
+/**
  * Fetch a page with browser fallback for Cloudflare-protected sources.
  * Same strategy as PenguPlay: try fetch() first (fast), fall back to
  * puppeteer if CF blocks (403/503).
@@ -419,6 +627,20 @@ function rewritePenguStream(stream, ourBaseUrl) {
 
 async function fetchPenguStreams(target, userConfig) {
   const config = buildPenguConfig(userConfig);
+
+  // Auto-discover new PenguPlay sources — NON-BLOCKING
+  // Use cached value if available (refreshed every 5 min in background)
+  // Don't await if cache is empty — just use what we have
+  if (_penguSourcesCache) {
+    for (const src of _penguSourcesCache) {
+      if (!(src.key in config)) {
+        config[src.key] = src.defaultEnabled ? 'checked' : 'unchecked';
+      }
+    }
+  }
+  // Trigger background refresh (non-blocking)
+  getDiscoveredPenguSources().catch(() => {});
+
   const configB64 = encodeConfig(config);
 
   let penguId;
@@ -724,7 +946,51 @@ async function scrapeExtraSource(source, target, title) {
     }
   }
 
-  console.log(`  [extra:${source.slug}] found ${streams.length} streams`);
+  console.log(`  [extra:${source.slug}] found ${streams.length} streams from HTML scraping`);
+
+  // FALLBACK: If no streams found via HTML scraping, use PenguPlay's browser
+  // network interception technique — launch browser, navigate to the page,
+  // click play, and capture .m3u8/.mp4/.ts URLs from network traffic.
+  // This is the SAME technique PenguPlay uses server-side.
+  if (streams.length === 0) {
+    console.log(`  [extra:${source.slug}] no HTML streams — trying browser network capture`);
+
+    // For embed sources, scrape the embed URL directly
+    // For movie_series sources, scrape the detail page (if found) or search page
+    let browserScrapeUrl;
+    if (source.type === 'embed') {
+      browserScrapeUrl = searchUrl;
+    } else {
+      // Try to find detail page link from search HTML
+      const detailLinkMatch = searchHtml.match(
+        /href="(https?:\/\/[^"]*(?:\/\d{4}\/|\/movie\/|\/film\/|\/series\/|\/watch\/|\/tv\/|\/episode\/)[^"]+)"/i
+      );
+      browserScrapeUrl = detailLinkMatch ? detailLinkMatch[1] : searchUrl;
+    }
+
+    const capturedStreams = await browserScrapeStreams(browserScrapeUrl, {
+      referer: source.homepage,
+      timeout: 20_000,
+    });
+
+    for (const cap of capturedStreams.slice(0, 3)) {
+      streams.push(buildExtraStream({
+        source,
+        title,
+        filename: '',
+        fileSize: cap.size || 0,
+        directUrl: cap.url,
+        cdn: 'browser-capture',
+        referer: cap.headers.referer || browserScrapeUrl,
+        cookie: cap.headers.cookie || '',
+        index: streams.length + 1,
+      }));
+    }
+
+    console.log(`  [extra:${source.slug}] browser capture found ${capturedStreams.length} streams`);
+  }
+
+  console.log(`  [extra:${source.slug}] total: ${streams.length} streams`);
   return streams;
 }
 
