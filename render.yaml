@@ -1,0 +1,17 @@
+# Render.com Blueprint — tells Render to deploy the backend/ directory
+# This file is auto-detected by Render when you create a new service from a repo
+services:
+  - type: web
+    name: herumhai-backend
+    env: node
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 20.0.0
+      - key: DATABASE_URL
+        sync: false
+      - key: TMDB_API_KEY
+        sync: false
