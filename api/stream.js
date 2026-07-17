@@ -664,7 +664,11 @@ function rewriteStreamUrl(penguUrl, ourBaseUrl) {
 function rewritePenguStream(stream, ourBaseUrl) {
   if (!stream) return stream;
   if (!stream.url) return stream;
-  const newName = (stream.name || '').replace(/PenguPlay/g, 'HerumHai');
+  // Replace PenguPlay → HerumHai AND remove 🐧 emoji
+  const newName = (stream.name || '')
+    .replace(/PenguPlay/g, 'HerumHai')
+    .replace(/🐧\s*/g, '')
+    .trim();
   const newDescription = (stream.description || '').replace(/PenguPlay/g, 'HerumHai');
   return {
     ...stream,
@@ -849,7 +853,7 @@ function buildExtraStream({ source, title, filename, fileSize, directUrl, cdn, r
   if (audio.length > 0) descLines.push(`🎧 Audio: ${audio.join(', ')}`);
 
   const snowflake = quality.rank >= 2160 ? '❄️' : quality.rank >= 1080 ? '🎯' : '📺';
-  const name = `🐧 HerumHai ${snowflake} ${quality.label} • ${source.name}`;
+  const name = `HerumHai ${snowflake} ${quality.label} • ${source.name}`;
 
   const tokenData = {
     kind: 'direct',
@@ -1367,9 +1371,66 @@ async function resolveStreams(target, userConfig, baseUrl) {
     }
   }
 
-  const downloadCount = unique.filter((s) => s.name?.includes('⬇️')).length;
-  console.log(`[scraper] total unique playable streams: ${unique.length} (${downloadCount} download) (in ${Date.now() - startTime}ms)`);
-  return unique;
+  // Sort streams by quality hierarchy:
+  //   1. Quality: 4K (2160p) → 1080p → 720p → 480p → 360p → unknown
+  //   2. Source type: REMUX → BluRay → WEB-DL → WEBRip → other
+  //   3. File size: largest first (higher bitrate = better quality)
+  //   Download streams (⬇️) go to the bottom
+  const sorted = unique.sort((a, b) => {
+    // Download streams to the bottom
+    const aDl = (a.name || '').includes('⬇️') ? 1 : 0;
+    const bDl = (b.name || '').includes('⬇️') ? 1 : 0;
+    if (aDl !== bDl) return aDl - bDl;
+
+    // Parse quality from name/description/filename
+    const getText = (s) => ((s.name || '') + ' ' + (s.description || '') + ' ' + (s.behaviorHints?.filename || '')).toLowerCase();
+    const aText = getText(a);
+    const bText = getText(b);
+
+    // Quality rank: 4K=5, 1080p=4, 720p=3, 480p=2, 360p=1, unknown=0
+    const getQualityRank = (t) => {
+      if (/2160p|4k|uhd/.test(t)) return 5;
+      if (/1080p|fhd/.test(t)) return 4;
+      if (/720p|hd/.test(t)) return 3;
+      if (/480p|sd/.test(t)) return 2;
+      if (/360p/.test(t)) return 1;
+      return 0;
+    };
+    const aQ = getQualityRank(aText);
+    const bQ = getQualityRank(bText);
+    if (aQ !== bQ) return bQ - aQ;  // Higher quality first
+
+    // Source type rank: REMUX=4, BluRay=3, WEB-DL=2, WEBRip=1, other=0
+    const getSourceRank = (t) => {
+      if (/remux/.test(t)) return 4;
+      if (/blu-?ray|blueray/.test(t)) return 3;
+      if (/web-?dl|webdl/.test(t)) return 2;
+      if (/webrip|web-rip/.test(t)) return 1;
+      return 0;
+    };
+    const aS = getSourceRank(aText);
+    const bS = getSourceRank(bText);
+    if (aS !== bS) return bS - aS;  // Higher source quality first
+
+    // File size: largest first (videoSize or parsed from description)
+    const getSize = (s) => {
+      if (s.behaviorHints?.videoSize) return s.behaviorHints.videoSize;
+      const sizeMatch = (s.description || '').match(/([\d.]+)\s*(GB|MB|TB)/i);
+      if (sizeMatch) {
+        const num = parseFloat(sizeMatch[1]);
+        const unit = sizeMatch[2].toUpperCase();
+        if (unit === 'TB') return num * 1024 * 1024;
+        if (unit === 'GB') return num * 1024;
+        return num;  // MB
+      }
+      return 0;
+    };
+    return getSize(b) - getSize(a);  // Larger file first
+  });
+
+  const downloadCount = sorted.filter((s) => s.name?.includes('⬇️')).length;
+  console.log(`[scraper] total sorted streams: ${sorted.length} (${downloadCount} download) (in ${Date.now() - startTime}ms)`);
+  return sorted;
 }
 
 // ---------------------------------------------------------------------------

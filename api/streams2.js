@@ -229,16 +229,19 @@ function rewriteHdHubStream(stream, ourBaseUrl) {
   if (!newUrl) return null;
 
   // Replace branding: "HdHub" → "HerumHai", "4KHDHub" → "HerumHai 4K"
+  // Remove 🐧 emoji — keep names clean
   let newName = (stream.name || '')
     .replace(/4KHDHub/gi, 'HerumHai 4K')
     .replace(/HdHub/gi, 'HerumHai')
-    .replace(/OD/g, 'OD');  // keep OD as-is (it's a source code, not branding)
+    .replace(/OD/g, 'OD')
+    .replace(/🐧\s*/g, '')
+    .trim();
 
-  // Add 🐧 prefix if not present (HerumHai branding)
-  if (!newName.startsWith('🐧') && !newName.startsWith('⬇️')) {
-    newName = `🐧 HerumHai · ${newName}`;
+  // Add "HerumHai ·" prefix if not already branded
+  if (!newName.startsWith('HerumHai') && !newName.startsWith('⬇️')) {
+    newName = `HerumHai · ${newName}`;
   } else if (newName.startsWith('⬇️[TorBox]')) {
-    newName = newName.replace('⬇️[TorBox]', '🐧 HerumHai ⬇️[TorBox]');
+    newName = newName.replace('⬇️[TorBox]', 'HerumHai · ⬇️[TorBox]');
   }
 
   return {

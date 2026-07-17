@@ -150,11 +150,7 @@ export default function handler(req, res) {
     id: 'com.herumhai.premium.streams',
     version: '1.0.0',
     name: 'HerumHai',
-    description:
-      'HerumHai — Real-time stream resolver proxying 16 PenguPlay sources ' +
-      '(4KHDHub, MovieBox, MoviesDrives, VAPlayer, Videasy, ZXCStream, Aether, ' +
-      'Artemis, VidLink, VidFast, HDGharTV, CineFreak, Aniwaves, AnimeSuge, MKVBase, 111477). ' +
-      'Direct HLS/MP4 streams with signed proxy headers.',
+    description: 'Stream movies and series in Stremio with configurable provider and quality filters.',
     resources: ['stream'],
     types: ['movie', 'series', 'anime'],
     idPrefixes: ['tt', 'kitsu', 'tmdb:'],
