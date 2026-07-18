@@ -224,9 +224,11 @@ function rewriteHdHubStream(stream, ourBaseUrl) {
   if (desc.includes('file not found')) return null;
   if (originalUrl === '/login.php?action=logout') return null;
 
-  // Rewrite URL to our signed /direct/ proxy
-  const newUrl = rewriteHdHubStreamUrl(originalUrl, sourceSlug, ourBaseUrl);
-  if (!newUrl) return null;
+  // CRITICAL FIX: Return HdHub's original URL directly — do NOT wrap in /direct/ proxy.
+  // Vercel serverless functions can't stream video (returns 302 SSO redirect).
+  // Stremio's player handles proxyHeaders natively — it sends the correct
+  // Referer/User-Agent when fetching the stream.
+  // This is exactly how HdHub's own addon works — direct URLs, no proxy.
 
   // Replace branding: "HdHub" → "HerumHai", "4KHDHub" → "HerumHai 4K"
   // Remove 🐧 emoji — keep names clean
@@ -244,21 +246,30 @@ function rewriteHdHubStream(stream, ourBaseUrl) {
     newName = newName.replace('⬇️[TorBox]', 'HerumHai · ⬇️[TorBox]');
   }
 
+  // Determine the correct Referer based on the URL host
+  let referer = 'https://hdhub.thevolecitor.qzz.io/';
+  try {
+    const parsed = new URL(originalUrl);
+    if (parsed.hostname.includes('111477')) referer = 'https://a.111477.xyz/';
+    else if (parsed.hostname.includes('hubcloud')) referer = 'https://hubcloud.cx/';
+    else if (parsed.hostname.includes('workers.dev')) referer = 'https://hdhub.thevolecitor.qzz.io/';
+  } catch {}
+
   return {
     ...stream,
     name: newName,
     description: stream.description || '',
-    url: newUrl,
+    url: originalUrl,  // pass through original URL — no proxy
     behaviorHints: {
       ...(stream.behaviorHints || {}),
       notWebReady: true,
       // Preserve videoSize if present (HdHub's size hint)
       ...(stream.behaviorHints?.videoSize ? { videoSize: stream.behaviorHints.videoSize } : {}),
-      // Add proxyHeaders for our /direct/ proxy
+      // proxyHeaders — Stremio's player sends these when fetching the stream
       proxyHeaders: {
         request: {
           'User-Agent': USER_AGENT,
-          'Referer': HDHUB_UPSTREAM + '/',
+          'Referer': referer,
         },
       },
       bingeGroup: `herumhai-hdhub-${Date.now().toString(36)}`,

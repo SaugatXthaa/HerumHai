@@ -25,14 +25,18 @@
 // ============================================================================
 
 import { fetchHtml, extractHubCloudIds, resolveHubCloud, detectQuality, detectAudio, formatFileSize } from './hubcloud.js';
+import { browserScrapeSource, closeBrowser } from './browser.js';
+import { scrape4KHDHub, closeBrowser as close4KHDHubBrowser } from './4khdhub.js';
+import { scrapeHDGharTV } from './hdghartv.js';
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 
 // ---------------------------------------------------------------------------
-// Factory: HubCloud-based source scraper
+// Factory: HubCloud-based source scraper (WITH BROWSER RENDERING)
 // ----------------------------------------------------------------------------
-// Creates a bespoke scraper for any source that uses HubCloud embeds.
-// This covers 9 of PenguPlay's 16 sources.
+// Uses puppeteer to render JS-heavy source websites, then extracts HubCloud
+// links from the rendered DOM. This is the SAME technique PenguPlay uses.
+// Without this, axios-only scraping returns 0 streams (JS content not loaded).
 // ---------------------------------------------------------------------------
 
 function createHubCloudSource(slug, name, homepage, searchPath, extraDetailPatterns = []) {
@@ -48,45 +52,17 @@ function createHubCloudSource(slug, name, homepage, searchPath, extraDetailPatte
       const searchUrl = homepage + searchPath.replace('{query}', query);
       console.log(`  [${slug}] → ${searchUrl.slice(0, 100)}`);
 
-      let hubcloudIds = [];
-      let directUrls = [];
+      // Use browser to scrape JS-heavy source sites (same as PenguPlay)
+      const { hubcloudIds, directUrls } = await browserScrapeSource(searchUrl, slug);
 
-      // Step 1: Fetch search results
-      const searchRes = await fetchHtml(searchUrl, { timeout: 10000 });
-      if (searchRes.status !== 200 || !searchRes.body) {
-        console.log(`  [${slug}] search returned ${searchRes.status}`);
+      if (hubcloudIds.length === 0 && directUrls.length === 0) {
+        console.log(`  [${slug}] no HubCloud IDs or direct URLs found`);
         return [];
       }
-      hubcloudIds = extractHubCloudIds(searchRes.body);
 
-      // Also extract a.111477.xyz direct URLs (some sources list these)
-      const odMatches = searchRes.body.match(/https?:\/\/a\.111477\.xyz\/[^\s"'<>]+/gi) || [];
-      directUrls = odMatches.filter(u => !u.includes('tutorial') && !u.includes('sample'));
+      console.log(`  [${slug}] found ${hubcloudIds.length} HubCloud IDs, ${directUrls.length} direct URLs`);
 
-      // Step 2: Find detail page
-      // Exclude wp-content/uploads (favicon/logo URLs), only match actual movie/series pages
-      const detailRegex = /href="(https?:\/\/[^"]*(?:\/\d{4}\/(?!.*(?:uploads|wp-content))[^"]*(?:\/|$)|\/movie\/[^"]+|\/film\/[^"]+|\/series\/[^"]+|\/watch\/[^"]+|\/tv\/[^"]+|\/episode\/[^"]+))"/i;
-      const detailMatches = searchRes.body.matchAll(new RegExp(detailRegex.source, 'gi'));
-      let detailFound = false;
-      for (const match of detailMatches) {
-        if (detailFound) break;
-        const detailUrl = match[1];
-        // Skip wp-content, uploads, favicon, logo URLs
-        if (/wp-content|uploads|favicon|logo|\.png|\.jpg|\.gif|\.ico/i.test(detailUrl)) continue;
-        console.log(`  [${slug}] → detail: ${detailUrl.slice(0, 80)}`);
-        const detailRes = await fetchHtml(detailUrl, {
-          headers: { Referer: searchUrl },
-          timeout: 10000,
-        });
-        if (detailRes.body) {
-          hubcloudIds = [...new Set([...hubcloudIds, ...extractHubCloudIds(detailRes.body)])];
-          const detailOd = detailRes.body.match(/https?:\/\/a\.111477\.xyz\/[^\s"'<>]+/gi) || [];
-          directUrls = [...new Set([...directUrls, ...detailOd.filter(u => !u.includes('tutorial') && !u.includes('sample'))])];
-          detailFound = true;
-        }
-      }
-
-      // Step 3: Resolve HubCloud IDs
+      // Resolve HubCloud IDs → direct CDN URLs
       const streams = [];
       for (const id of hubcloudIds.slice(0, 5)) {
         try {
@@ -95,13 +71,19 @@ function createHubCloudSource(slug, name, homepage, searchPath, extraDetailPatte
             const quality = detectQuality(resolved.filename || resolved.directUrl);
             const audio = detectAudio(resolved.filename);
             streams.push({
-              name: `🐧 HerumHai ${quality.rank >= 2160 ? '❄️' : '🎯'} ${quality.label} • ${name}`,
+              name: `HerumHai ${quality.rank >= 2160 ? '❄️' : '🎯'} ${quality.label} • ${name}`,
               description: `🍿 ${title}\n💾 ${formatFileSize(resolved.fileSize)}\n🎧 Audio: ${audio.join(', ')}`,
               url: resolved.directUrl,
               behaviorHints: {
                 notWebReady: true,
                 filename: resolved.filename || '',
                 videoSize: resolved.fileSize || 0,
+                proxyHeaders: {
+                  request: {
+                    'User-Agent': USER_AGENT,
+                    'Referer': resolved.referer || 'https://hubcloud.cx/',
+                  },
+                },
               },
               sourceSlug: slug,
             });
@@ -111,19 +93,25 @@ function createHubCloudSource(slug, name, homepage, searchPath, extraDetailPatte
         }
       }
 
-      // Step 4: Add direct 111477 URLs (wrap in p.111477.xyz/bulk proxy)
+      // Add direct 111477 URLs (wrap in p.111477.xyz/bulk proxy)
       for (const url of directUrls.slice(0, 3)) {
         if (url.startsWith('https://a.111477.xyz/')) {
           const bulkUrl = `https://p.111477.xyz/bulk?u=${encodeURIComponent(url)}`;
           const filename = url.split('/').pop() || '';
           const quality = detectQuality(filename);
           streams.push({
-            name: `🐧 HerumHai ${quality.rank >= 2160 ? '❄️' : '🎯'} ${quality.label} • ${name} · OD`,
+            name: `HerumHai ${quality.rank >= 2160 ? '❄️' : '🎯'} ${quality.label} • ${name} · OD`,
             description: `🍿 ${title}\n💾 OD Direct\n🎬 ${filename}`,
             url: bulkUrl,
             behaviorHints: {
               notWebReady: true,
               filename,
+              proxyHeaders: {
+                request: {
+                  'User-Agent': USER_AGENT,
+                  'Referer': 'https://a.111477.xyz/',
+                },
+              },
             },
             sourceSlug: slug,
           });
@@ -141,8 +129,19 @@ function createHubCloudSource(slug, name, homepage, searchPath, extraDetailPatte
 // ----------------------------------------------------------------------------
 
 export const ALL_SOURCES = [
-  // 1. HubCloud-based sources (9 sources — same technique PenguPlay uses)
-  createHubCloudSource('4khdhub', '4KHDHub', 'https://4khdhub.store', '/?s={query}'),
+  // 1. 4KHDHub.store — dedicated scraper (FSL streams via videasy.to player)
+  //    Uses JSON.parse hook to capture decrypted HLS stream URLs
+  //    VERIFIED: Returns real 4K/1080p/720p/480p HLS streams
+  {
+    slug: '4khdhub',
+    name: '4KHDHub',
+    homepage: 'https://4khdhub.store',
+    searchPath: '/search?q={query}',
+    type: 'hubcloud',
+    async scrape(target, title) {
+      return scrape4KHDHub(title, target.imdbId, target.type, target.season, target.episode);
+    },
+  },
   createHubCloudSource('cinefreak', 'CineFreak', 'https://cinefreak.net', '/?s={query}'),
   createHubCloudSource('moviebox', 'MovieBox', 'https://moviebox.online', '/?s={query}'),
   createHubCloudSource('mkvbase', 'MKVBase', 'https://mkvbase.com', '/?s={query}'),
@@ -150,7 +149,18 @@ export const ALL_SOURCES = [
   createHubCloudSource('vaplayer', 'VAPlayer', 'https://vaplayer.com', '/?s={query}'),
   createHubCloudSource('videasy', 'Videasy', 'https://www.videasy.to', '/?s={query}'),
   createHubCloudSource('aether', 'Aether', 'https://aether.cx', '/?s={query}'),
-  createHubCloudSource('hdghartv', 'HDGharTV', 'https://hdghartv.cc', '/?s={query}'),
+  // HDGharTV — dedicated scraper (API + browser HLS capture)
+  // VERIFIED: Returns real HLS streams from cdn3.streamraiwind.stream
+  {
+    slug: 'hdghartv',
+    name: 'HDGharTV',
+    homepage: 'https://hdghartv.cc',
+    searchPath: '/?s={query}',
+    type: 'hubcloud',
+    async scrape(target, title) {
+      return scrapeHDGharTV(title, target.imdbId, target.type, target.season, target.episode);
+    },
+  },
 
   // 2. 111477 / OD — direct file CDN (searches 4KHDHub for file listings)
   createHubCloudSource('111477', '111477', 'https://4khdhub.store', '/?s={query}'),
@@ -290,7 +300,7 @@ export const ALL_SOURCES = [
 
   // 5. Extra user sources (HubCloud-based, same technique)
   createHubCloudSource('filmhds', 'FilmHDS', 'https://filmhds.com', '/?s={query}'),
-  createHubCloudSource('hdhub4u', 'HDHub4u', 'https://new2.hdhub4u.cl', '/?s={query}'),
+  createHubCloudSource('hdhub4u', 'HDHub4u', 'https://new3.hdhub4u.cl', '/?s={query}'),
   createHubCloudSource('nima4k', 'Nima4K', 'https://nima4k.org', '/?s={query}'),
   createHubCloudSource('allmovieland', 'AllMovieLand', 'https://allmovieland.one', '/?s={query}'),
   createHubCloudSource('uhdmovies', 'UHDMovies', 'https://uhdmovies.casa', '/?s={query}'),
@@ -307,7 +317,7 @@ export const ALL_SOURCES = [
 // Scrape all sources in parallel (with timeout per source)
 // ---------------------------------------------------------------------------
 
-export async function scrapeAllSources(target, title, timeoutMs = 15000) {
+export async function scrapeAllSources(target, title, timeoutMs = 25000) {
   console.log(`[sources] scraping ${ALL_SOURCES.length} sources for "${title}"`);
 
   // Filter sources by content type
@@ -316,27 +326,28 @@ export async function scrapeAllSources(target, title, timeoutMs = 15000) {
     return s.type === 'hubcloud' || s.type === 'hls';
   });
 
-  // Scrape all sources in parallel with per-source timeout
-  const results = await Promise.allSettled(
-    candidates.map(async (source) => {
-      try {
-        const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('source-timeout')), timeoutMs)
-        );
-        const streams = await Promise.race([source.scrape(target, title), timeoutPromise]);
-        return { slug: source.slug, streams };
-      } catch (e) {
-        console.log(`  [${source.slug}] error: ${e.message}`);
-        return { slug: source.slug, streams: [] };
-      }
-    })
-  );
-
-  // Flatten all streams
+  // Scrape sources SEQUENTIALLY (not parallel) to avoid crashing browser
+  // Browser can only handle 1-2 pages at a time on limited memory
   const allStreams = [];
-  for (const result of results) {
-    if (result.status === 'fulfilled' && result.value.streams.length > 0) {
-      allStreams.push(...result.value.streams);
+
+  for (const source of candidates) {
+    try {
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('source-timeout')), timeoutMs)
+      );
+      const streams = await Promise.race([source.scrape(target, title), timeoutPromise]);
+      if (streams.length > 0) {
+        allStreams.push(...streams);
+        console.log(`  [${source.slug}] ✓ ${streams.length} streams`);
+      }
+    } catch (e) {
+      console.log(`  [${source.slug}] error: ${e.message}`);
+    }
+
+    // Stop early if we have enough streams
+    if (allStreams.length >= 10) {
+      console.log(`[sources] reached 10 streams, stopping early`);
+      break;
     }
   }
 
@@ -349,6 +360,9 @@ export async function scrapeAllSources(target, title, timeoutMs = 15000) {
       unique.push(s);
     }
   }
+
+  // Close browser to free memory
+  await closeBrowser().catch(() => {});
 
   console.log(`[sources] total: ${unique.length} unique streams from ${candidates.length} sources`);
   return unique;

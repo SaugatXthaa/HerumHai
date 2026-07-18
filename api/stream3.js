@@ -83,50 +83,11 @@ export default async function handler(req, res) {
     const streams = data.streams || [];
     console.log(`[/api/streams3] backend returned ${streams.length} streams (cached=${data.cached || false})`);
 
-    // Rewrite stream URLs to point to our Vercel /direct/ proxy
-    // (backend returns raw URLs; we need to sign them with our DIRECT_URL_SECRET)
-    const { createHmac, randomBytes } = await import('node:crypto');
-    const DIRECT_URL_SECRET = process.env.DIRECT_URL_SECRET || 'herumhai-dev-secret';
-    const baseUrl = process.env.VERCEL_URL
-      ? `https://${process.env.VERCEL_URL}`
-      : `https://${req.headers.host || 'herum-hai.vercel.app'}`;
-
-    const rewrittenStreams = streams.map((s) => {
-      if (!s.url || !s.url.startsWith('http')) return s;
-
-      // Build signed /direct/ URL
-      const tokenData = {
-        kind: 'direct',
-        url: s.url,
-        referer: s.behaviorHints?.proxyHeaders?.request?.Referer || '',
-        cookie: '',
-        filename: s.behaviorHints?.filename || '',
-      };
-      const token = Buffer.from(JSON.stringify(tokenData)).toString('base64url');
-      const filename = s.behaviorHints?.filename || 'stream.mkv';
-      const ts = Math.floor(Date.now() / 1000);
-      const sig = createHmac('sha256', DIRECT_URL_SECRET)
-        .update(`${ts}.${token}.${filename}`)
-        .digest('base64url');
-      const psig = `${ts}.${sig}`;
-
-      return {
-        ...s,
-        url: `${baseUrl}/direct/backend/${token}/${encodeURIComponent(filename)}?psig=${encodeURIComponent(psig)}`,
-        behaviorHints: {
-          ...s.behaviorHints,
-          notWebReady: true,
-          proxyHeaders: {
-            request: {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0.0.0 Safari/537.36',
-              ...(s.behaviorHints?.proxyHeaders?.request || {}),
-            },
-          },
-        },
-      };
-    });
-
-    return res.status(200).json({ streams: rewrittenStreams });
+    // CRITICAL FIX: Return direct CDN URLs — do NOT wrap in /direct/ proxy.
+    // Vercel serverless functions can't stream video (returns 302 SSO redirect).
+    // Stremio's player handles proxyHeaders natively.
+    // Backend already returns direct URLs with proxyHeaders set — just pass through.
+    return res.status(200).json({ streams });
   } catch (e) {
     console.error(`[/api/streams3] error: ${e.message}`);
     return res.status(200).json({ streams: [] });

@@ -641,24 +641,12 @@ function signOurPsig(token, filename) {
 }
 
 function rewriteStreamUrl(penguUrl, ourBaseUrl) {
-  if (!penguUrl || !penguUrl.includes('/direct/')) return penguUrl;
-  try {
-    const url = new URL(penguUrl);
-    const parts = url.pathname.split('/').filter(Boolean);
-    const directIdx = parts.findIndex((p) => p === 'direct');
-    if (directIdx === -1 || directIdx + 2 >= parts.length) return penguUrl;
-    const source = parts[directIdx + 1];
-    const penguToken = parts[directIdx + 2];
-    const filename = parts.slice(directIdx + 3).join('/');
-    const tokenData = decodePenguToken(penguToken);
-    if (!tokenData) return penguUrl;
-    const ourToken = encodeOurToken(tokenData);
-    const safeFilename = encodeURIComponent(filename || 'stream.mkv');
-    const psig = signOurPsig(ourToken, filename || 'stream.mkv');
-    return `${ourBaseUrl}/direct/${source}/${ourToken}/${safeFilename}?psig=${encodeURIComponent(psig)}`;
-  } catch (e) {
-    return penguUrl;
-  }
+  // Pass through PenguPlay's original URL directly.
+  // PenguPlay's /direct/ URLs require their server to proxy the stream
+  // (they validate the psig signature server-side and redirect to the CDN).
+  // Stremio follows the redirect and plays from the CDN directly.
+  // We do NOT wrap in our own /direct/ proxy (Vercel can't stream video).
+  return penguUrl;
 }
 
 function rewritePenguStream(stream, ourBaseUrl) {
@@ -670,11 +658,25 @@ function rewritePenguStream(stream, ourBaseUrl) {
     .replace(/🐧\s*/g, '')
     .trim();
   const newDescription = (stream.description || '').replace(/PenguPlay/g, 'HerumHai');
+
+  // Pass through PenguPlay's original URL — their server handles the streaming
+  // PenguPlay's /direct/{source}/{token}/{filename}?psig= URLs work because:
+  //   1. Stremio requests the URL from pengu.uk
+  //   2. PenguPlay validates psig, resolves the CDN URL server-side
+  //   3. PenguPlay returns a 307 redirect to the actual CDN (Google Drive, etc.)
+  //   4. Stremio follows the redirect and plays from the CDN directly
+  //   5. Seeking works because the CDN supports Range headers
+  //
+  // We do NOT add our own proxyHeaders — PenguPlay handles everything server-side.
+  // Their proxyHeaders is {} (empty) for a reason: no custom headers needed.
+  const bh = stream.behaviorHints || {};
+
   return {
     ...stream,
     name: newName,
     description: newDescription,
-    url: rewriteStreamUrl(stream.url, ourBaseUrl),
+    url: stream.url,  // pass through PenguPlay's original URL
+    behaviorHints: bh,  // keep PenguPlay's original behaviorHints (including their proxyHeaders)
   };
 }
 
@@ -855,22 +857,14 @@ function buildExtraStream({ source, title, filename, fileSize, directUrl, cdn, r
   const snowflake = quality.rank >= 2160 ? '❄️' : quality.rank >= 1080 ? '🎯' : '📺';
   const name = `HerumHai ${snowflake} ${quality.label} • ${source.name}`;
 
-  const tokenData = {
-    kind: 'direct',
-    url: directUrl,
-    referer,
-    cookie,
-    filename,
-  };
-  const ourToken = encodeOurToken(tokenData);
-  const safeFilename = encodeURIComponent(filename || `${source.slug}-${index}.mp4`);
-  const psig = signOurPsig(ourToken, filename || `${source.slug}-${index}.mp4`);
-  const signedUrl = `${getBaseUrlRef()}/direct/${source.slug}/${ourToken}/${safeFilename}?psig=${encodeURIComponent(psig)}`;
-
+  // CRITICAL FIX: Return the direct CDN URL directly — do NOT wrap in /direct/ proxy.
+  // Vercel serverless functions can't stream video (returns 302 SSO redirect).
+  // Stremio's player handles proxyHeaders natively — it sends the correct
+  // Referer/User-Agent/Cookie when fetching the stream.
   return {
     name,
     description: descLines.join('\n'),
-    url: signedUrl,
+    url: directUrl,  // direct CDN URL — no proxy
     behaviorHints: {
       notWebReady: true,
       filename: filename || `${title || source.slug}.mp4`,

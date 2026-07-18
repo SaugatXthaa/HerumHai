@@ -53,12 +53,14 @@ export async function resolveHubCloud(hubcloudId) {
       });
       if (landing.status !== 200 || !landing.body) continue;
 
-      const gamerxytMatch = landing.body.match(
-        /https?:\/\/gamerxyt\.com\/hubcloud\.php\?host=[^"&\s]+&id=[^"&\s]+&token=[A-Za-z0-9+/=]+/i
+      // HubCloud proxy URL — domain rotates (gamerxyt.com, sportverse.cc, etc.)
+      // Match ANY domain that has /hubcloud.php
+      const proxyMatch = landing.body.match(
+        /https?:\/\/[a-z0-9.-]+\/hubcloud\.php\?host=[^"&\s]+&id=[^"&\s]+&token=[A-Za-z0-9+/=]+/i
       );
-      if (!gamerxytMatch) continue;
+      if (!proxyMatch) continue;
 
-      const proxy = await fetchHtml(gamerxytMatch[0], {
+      const proxy = await fetchHtml(proxyMatch[0], {
         headers: { Referer: landingUrl },
         timeout: 10000,
       });
