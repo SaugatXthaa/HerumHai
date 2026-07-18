@@ -172,9 +172,10 @@ export async function scrapeTitle(type, ids, season, episode, title) {
   }
 
   // Fetch from ALL sources IN PARALLEL:
-  // 1. CLONED SOURCES (28 sources — PRIMARY, independent of PenguPlay/HdHub)
+  // 1. CLONED SOURCES (34 sources — PRIMARY, independent of PenguPlay/HdHub)
   // 2. PenguPlay proxy (BONUS — adds streams when available)
   // 3. HdHub proxy (BONUS — adds OD direct CDN streams)
+  // BUGFIX: pass kitsuId in the target so universal/animesky sources can use it
   const [clonedStreams, penguStreams, hdhubStreams] = await Promise.all([
     scrapeAllSources({ type, ...ids, season, episode }, title, 15000).catch((e) => {
       console.log(`[scraper] cloned sources error: ${e.message}`);

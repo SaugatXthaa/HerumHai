@@ -28,6 +28,9 @@ import { fetchHtml, extractHubCloudIds, resolveHubCloud, detectQuality, detectAu
 import { browserScrapeSource, closeBrowser } from './browser.js';
 import { scrape4KHDHub, closeBrowser as close4KHDHubBrowser } from './4khdhub.js';
 import { scrapeHDGharTV } from './hdghartv.js';
+import { CF_BLOCKED_SOURCES, closeCFBrowser } from './cf_sources.js';
+import { scrapeAnimeSky, closeBrowser as closeAnimeSkyBrowser } from './animesky.js';
+import { scrapeUniversalEmbeds, scrapeStreameX, closeBrowser as closeUniversalBrowser } from './universal_embeds.js';
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 
@@ -129,9 +132,55 @@ function createHubCloudSource(slug, name, homepage, searchPath, extraDetailPatte
 // ----------------------------------------------------------------------------
 
 export const ALL_SOURCES = [
+  // ---------------------------------------------------------------------------
+  // UNIVERSAL EMBED SOURCES — run FIRST (fastest, highest yield, no browser)
+  // ---------------------------------------------------------------------------
+  // These use play.xpass.top via curl (mobile UA bypasses CF). They work for
+  // ALL content types (movie/series/anime) via IMDB or TMDB ID.
+  // Placing them first ensures streams are returned fast even if slower
+  // browser-based sources time out.
+  {
+    slug: 'universal',
+    name: 'Universal',
+    homepage: 'https://play.xpass.top',
+    searchPath: '/e/{type}/{imdb}',
+    type: 'embed',
+    async scrape(target, title) {
+      // Pass both imdbId and kitsuId — universal_embeds.js resolves kitsu→TMDB
+      // if no IMDB ID is available (anime case)
+      const imdbId = target.imdbId || (target.rawId && target.rawId.startsWith('tt') ? target.rawId : null);
+      const kitsuId = target.kitsuId || null;
+      if (!imdbId && !kitsuId) {
+        console.log(`  [universal] no IMDB or kitsu ID — cannot use universal embeds`);
+        return [];
+      }
+      // For anime, treat as series (xpass.top uses /tv/ endpoint)
+      const type = target.type === 'anime' ? 'series' : target.type;
+      return scrapeUniversalEmbeds(title, imdbId, type, target.season, target.episode, kitsuId);
+    },
+  },
+  {
+    slug: 'streamex',
+    name: 'StreameX',
+    homepage: 'https://streamex.sh',
+    searchPath: '/e/{type}/{imdb}',
+    type: 'embed',
+    async scrape(target, title) {
+      const imdbId = target.imdbId || (target.rawId && target.rawId.startsWith('tt') ? target.rawId : null);
+      const kitsuId = target.kitsuId || null;
+      if (!imdbId && !kitsuId) {
+        console.log(`  [streamex] no IMDB or kitsu ID — cannot use universal embeds`);
+        return [];
+      }
+      const type = target.type === 'anime' ? 'series' : target.type;
+      return scrapeStreameX(title, imdbId, type, target.season, target.episode, kitsuId);
+    },
+  },
+
   // 1. 4KHDHub.store — dedicated scraper (FSL streams via videasy.to player)
   //    Uses JSON.parse hook to capture decrypted HLS stream URLs
   //    VERIFIED: Returns real 4K/1080p/720p/480p HLS streams
+  //    Also has xpass.top fallback (Phase 1) for when SPA scraping fails
   {
     slug: '4khdhub',
     name: '4KHDHub',
@@ -139,7 +188,8 @@ export const ALL_SOURCES = [
     searchPath: '/search?q={query}',
     type: 'hubcloud',
     async scrape(target, title) {
-      return scrape4KHDHub(title, target.imdbId, target.type, target.season, target.episode);
+      // BUGFIX: pass kitsuId so xpass.top fallback can resolve anime kitsu→TMDB
+      return scrape4KHDHub(title, target.imdbId, target.type, target.season, target.episode, target.kitsuId);
     },
   },
   createHubCloudSource('cinefreak', 'CineFreak', 'https://cinefreak.net', '/?s={query}'),
@@ -165,58 +215,20 @@ export const ALL_SOURCES = [
   // 2. 111477 / OD — direct file CDN (searches 4KHDHub for file listings)
   createHubCloudSource('111477', '111477', 'https://4khdhub.store', '/?s={query}'),
 
-  // 3. HLS embed sources (4 sources — need browser network interception)
-  // These are configured but require browserScrapeStreams() which is in the
-  // Vercel addon. The backend marks them as 'hls' type so the addon can
-  // handle them. For now, the backend skips these (they're covered by the
-  // PenguPlay/HdHub proxy fallback in the Vercel addon).
-  {
-    slug: 'artemis',
-    name: 'Artemis',
-    homepage: 'https://artemis.to',
-    searchPath: '/?s={query}',
-    type: 'hls',
-    async scrape(target, title) {
-      // HLS sources require browser network interception
-      // Backend can't run puppeteer (Render free tier = 512MB RAM)
-      // These are handled by the Vercel addon's browserScrapeStreams()
-      console.log(`  [artemis] HLS source — skipped in backend (handled by Vercel addon)`);
-      return [];
-    },
-  },
-  {
-    slug: 'vidfast',
-    name: 'VidFast',
-    homepage: 'https://vidfast.to',
-    searchPath: '/?s={query}',
-    type: 'hls',
-    async scrape(target, title) {
-      console.log(`  [vidfast] HLS source — skipped in backend`);
-      return [];
-    },
-  },
-  {
-    slug: 'vidlink',
-    name: 'VidLink',
-    homepage: 'https://vidlink.pro',
-    searchPath: '/?s={query}',
-    type: 'hls',
-    async scrape(target, title) {
-      console.log(`  [vidlink] HLS source — skipped in backend`);
-      return [];
-    },
-  },
-  {
-    slug: 'zxcstream',
-    name: 'ZXCStream',
-    homepage: 'https://embed.zxcstream.xyz',
-    searchPath: '/?s={query}',
-    type: 'hls',
-    async scrape(target, title) {
-      console.log(`  [zxcstream] HLS source — skipped in backend`);
-      return [];
-    },
-  },
+  // 3. HLS embed sources (CF-blocked — handled by stealth_browser.js)
+  //    artemis.to is dead (domain expired) — removed
+  //    zxcstream / vidfast / vidlink are now real implementations in cf_sources.js
+  //    (SPA API interception: capture .m3u8 from network + scan JSON bodies)
+
+  // CF-AGGRESSIVELY-BLOCKED SOURCES — stealth browser + residential proxy
+  // zxcstream  → HLS embed player, network interception for .m3u8
+  // vidfast    → SPA HLS embed, streams via JSON API
+  // vidlink    → SPA HLS embed, streams via JSON API
+  // filmxy     → WordPress + GDrive links
+  // cinemacity → WordPress + HubCloud/GDrive links
+  // ddlbase    → DDL index/forum
+  // All require PROXY_URL env var on Render (residential proxy)
+  ...CF_BLOCKED_SOURCES,
 
   // 4. Anime sources (2 sources)
   {
@@ -298,6 +310,20 @@ export const ALL_SOURCES = [
     },
   },
 
+  // AnimeSky — dedicated scraper (FirePlayer API on as-cdn21.top)
+  // Returns signed HLS .m3u8 URL with multi-audio tracks
+  // (Hindi/Tamil/Telugu/English/Japanese). No browser needed — pure axios.
+  {
+    slug: 'animesky',
+    name: 'AnimeSky',
+    homepage: 'https://animesky.top',
+    searchPath: '/?s={query}',
+    type: 'anime',
+    async scrape(target, title) {
+      return scrapeAnimeSky(title, target.kitsuId, target.type, target.season, target.episode);
+    },
+  },
+
   // 5. Extra user sources (HubCloud-based, same technique)
   createHubCloudSource('filmhds', 'FilmHDS', 'https://filmhds.com', '/?s={query}'),
   createHubCloudSource('hdhub4u', 'HDHub4u', 'https://new3.hdhub4u.cl', '/?s={query}'),
@@ -311,6 +337,12 @@ export const ALL_SOURCES = [
   createHubCloudSource('acermovies', 'AcerMovies', 'https://acermovies.fun', '/?s={query}'),
   createHubCloudSource('moviedrive', 'MovieDrive', 'https://moviedrive.org', '/?s={query}'),
   createHubCloudSource('moviesmod', 'MoviesMod', 'https://moviesmod.at', '/?s={query}'),
+
+  // 4KHDHub.one — server-rendered WordPress site (NOT a React SPA like .store)
+  // Returns HubCloud IDs in detail page HTML. Verified working via curl.
+  // Distinct from 4khdhub.store which is now an SPA requiring embed fallback.
+  createHubCloudSource('4khdhub_one', '4KHDHub.one', 'https://4khdhub.one', '/?s={query}'),
+
 ];
 
 // ---------------------------------------------------------------------------
@@ -321,9 +353,11 @@ export async function scrapeAllSources(target, title, timeoutMs = 25000) {
   console.log(`[sources] scraping ${ALL_SOURCES.length} sources for "${title}"`);
 
   // Filter sources by content type
+  // NOTE: 'embed' type sources (universal, streamex) work for ALL content types
+  // via IMDB ID, so they're always included.
   const candidates = ALL_SOURCES.filter((s) => {
-    if (target.type === 'anime') return s.type === 'anime' || s.type === 'hubcloud';
-    return s.type === 'hubcloud' || s.type === 'hls';
+    if (target.type === 'anime') return s.type === 'anime' || s.type === 'hubcloud' || s.type === 'embed';
+    return s.type === 'hubcloud' || s.type === 'hls' || s.type === 'embed';
   });
 
   // Scrape sources SEQUENTIALLY (not parallel) to avoid crashing browser
@@ -361,8 +395,12 @@ export async function scrapeAllSources(target, title, timeoutMs = 25000) {
     }
   }
 
-  // Close browser to free memory
+  // Close browsers to free memory (legacy + stealth + animesky + universal + 4khdhub)
   await closeBrowser().catch(() => {});
+  await close4KHDHubBrowser().catch(() => {});
+  await closeCFBrowser().catch(() => {});
+  await closeAnimeSkyBrowser().catch(() => {});
+  await closeUniversalBrowser().catch(() => {});
 
   console.log(`[sources] total: ${unique.length} unique streams from ${candidates.length} sources`);
   return unique;

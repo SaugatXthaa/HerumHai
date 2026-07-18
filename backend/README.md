@@ -168,3 +168,59 @@ backend/
 | `DATABASE_URL` | Yes | PostgreSQL connection string (Render/Supabase/Neon) |
 | `TMDB_API_KEY` | Recommended | For seeding popular titles (free from themoviedb.org) |
 | `PORT` | No | Server port (default: 8080) |
+| `PROXY_URL` | For CF-blocked sources | `http://user:pass@host:port` — residential proxy (Smartproxy/Bright Data/IPRoyal) |
+| `PROXY_HOST` | Alt to PROXY_URL | e.g. `us.smartproxy.com` |
+| `PROXY_PORT` | Alt to PROXY_URL | e.g. `10000` |
+| `PROXY_USERNAME` | Alt to PROXY_URL | proxy auth username |
+| `PROXY_PASSWORD` | Alt to PROXY_URL | proxy auth password |
+
+## Stealth Browser for CF-Aggressively-Blocked Sources
+
+Four sources (`zxcstream`, `filmxy`, `cinemacity`, `ddlbase`) sit behind aggressive
+Cloudflare bot protection. They use a dedicated stealth browser factory:
+
+- **`sources/stealth_browser.js`** — puppeteer-extra + StealthPlugin +
+  AnonymizeUA + authenticated residential proxy + UA aligned with bundled
+  Chromium major (avoids JA3/JA4 mismatch) + WebRTC leak patch + navigator
+  overrides (webdriver, plugins, languages, chrome runtime).
+- **`sources/cf_sources.js`** — 4 refactored source scrapers that consume
+  the stealth factory. Two patterns:
+  - **HLS embed** (zxcstream): `newStealthPage()` → `navigateWithCFWait()` →
+    capture `.m3u8` URLs from network responses.
+  - **WordPress movie** (filmxy/cinemacity/ddlbase): search → find detail
+    link → extract HubCloud IDs / GDrive URLs / direct DDL → resolve via
+    `hubcloud.js`. Tries multiple alt-domains if primary is CF-blocked.
+
+Without `PROXY_URL` set, the stealth browser still runs but CF may detect
+the Render datacenter IP and block. ~$4/GB residential proxy from
+Smartproxy / Bright Data / IPRoyal is sufficient.
+
+### Install stealth deps (Render auto-runs `npm install`, but for local dev)
+
+```bash
+cd vercel-addon/backend
+npm install
+# This installs: puppeteer-extra, puppeteer-extra-plugin-stealth,
+#                puppeteer-extra-plugin-anonymize-ua, puppeteer-extra-plugin-adblocker,
+#                https-proxy-agent
+```
+
+### Validate stealth patches
+
+```bash
+node -e "
+import('./sources/stealth_browser.js').then(async ({ newStealthPage, navigateWithCFWait }) => {
+  const page = await newStealthPage();
+  await navigateWithCFWait(page, 'https://bot.sannysoft.com/', { maxWait: 20000 });
+  const results = await page.evaluate(() => ({
+    webdriver: navigator.webdriver,
+    chrome: !!window.chrome,
+    plugins: navigator.plugins.length,
+    languages: navigator.languages,
+  }));
+  console.log(JSON.stringify(results, null, 2));
+  await page.close();
+});
+"
+# webdriver should be undefined, chrome true, plugins > 0, languages = ['en-US','en','hi']
+```

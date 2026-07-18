@@ -1248,19 +1248,9 @@ async function resolveTitle(target) {
         }
       } catch {}
 
-      // Fallback 2: Jikan API (unofficial MAL API — no key needed)
-      // Search by kitsu ID → MAL ID → title
-      try {
-        const res = await fetch(`https://api.jikan.moe/v4/anime?q=${target.kitsuId}&limit=1`, {
-          signal: AbortSignal.timeout(5000),
-        });
-        if (res.ok) {
-          const data = await res.json();
-          const anime = data?.data?.[0];
-          const name = anime?.title_english || anime?.title || '';
-          if (name) return name;
-        }
-      } catch {}
+      // Kitsu.io API already returns the canonical title above.
+      // (Previous Jikan fallback was broken — it passed kitsuId as a `q=` title
+      // search, returning the wrong anime. Removed.)
       return '';
     }
     if (target.imdbId) {
@@ -1276,6 +1266,67 @@ async function resolveTitle(target) {
     }
   } catch {}
   return '';
+}
+
+// ---------------------------------------------------------------------------
+// Backend Streams — calls our dedicated backend (Render.com) which has:
+//   - Universal embed scraper (play.xpass.top via curl — works for ALL content)
+//   - AnimeSky dedicated scraper (FirePlayer API — multi-audio anime)
+//   - 4KHDHub with xpass.top fallback
+//   - Streamex (StreameX SPA bypass)
+// The backend is where all the dedicated scrapers live. The Vercel addon calls
+// it via /streams3/ endpoint to merge those streams with PenguPlay + HdHub.
+//
+// Set BACKEND_URL env var in Vercel to enable (e.g., https://herumhai-backend.onrender.com)
+// If not set, this is a no-op (returns empty array).
+// ---------------------------------------------------------------------------
+
+async function fetchBackendStreams(target) {
+  const backendUrl = process.env.BACKEND_URL;
+  if (!backendUrl) {
+    console.log(`[backend] BACKEND_URL not set — skipping`);
+    return [];
+  }
+
+  // Build the ID string for the backend
+  let backendId;
+  let backendType = target.type;
+  if (target.type === 'series') {
+    backendId = `${target.imdbId}:${target.season || 1}:${target.episode || 1}`;
+  } else if (target.type === 'anime') {
+    // Pass kitsu ID with episode — backend handles kitsu→TMDB resolution
+    backendId = target.kitsuId
+      ? `kitsu:${target.kitsuId}:${target.episode || 1}`
+      : target.imdbId;
+  } else {
+    backendId = target.imdbId;
+  }
+
+  if (!backendId) {
+    console.log(`[backend] no ID to send — skipping`);
+    return [];
+  }
+
+  const fetchUrl = `${backendUrl}/stream/${backendType}/${backendId}.json`;
+  console.log(`[backend] → ${fetchUrl.slice(0, 80)}`);
+
+  try {
+    const res = await fetch(fetchUrl, {
+      headers: { 'User-Agent': 'HerumHai-Vercel/1.0', Accept: 'application/json' },
+      signal: AbortSignal.timeout(20000),  // 20s — backend has its own 60s timeout
+    });
+    if (!res.ok) {
+      console.log(`[backend] HTTP ${res.status}`);
+      return [];
+    }
+    const data = await res.json();
+    const streams = data.streams || [];
+    console.log(`[backend] ✓ ${streams.length} streams (cached=${data.cached || false})`);
+    return streams;
+  } catch (e) {
+    console.log(`[backend] error: ${e.message}`);
+    return [];
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1354,8 +1405,20 @@ async function resolveStreams(target, userConfig, baseUrl) {
     ])
   );
 
+  // 3b. Backend sources (universal embeds via xpass.top + AnimeSky + 4KHDHub fallback)
+  // The backend has dedicated scrapers that work for anime (kitsu→TMDB resolution),
+  // movies, and TV series via play.xpass.top. This is the HIGHEST-YIELD source.
+  // Runs in parallel with everything else.
+  const backendPromise = fetchBackendStreams(target).then((streams) => {
+    console.log(`[backend] returned ${streams.length} streams in ${Date.now() - startTime}ms`);
+    return streams;
+  }).catch((e) => {
+    console.log(`[backend] failed (graceful degradation): ${e.message}`);
+    return [];
+  });
+
   // Wait for all three in parallel
-  const [penguStreams, hdhubStreams] = await Promise.all([penguPromise, hdhubPromise]);
+  const [penguStreams, hdhubStreams, backendStreams] = await Promise.all([penguPromise, hdhubPromise, backendPromise]);
 
   // Wait for extra sources (with total budget)
   const extraBudgetTimer = new Promise((resolve) => setTimeout(resolve, EXTRA_TOTAL_BUDGET_MS));
@@ -1370,10 +1433,10 @@ async function resolveStreams(target, userConfig, baseUrl) {
   const extraStreams = (await Promise.all(extraResults)).flat();
   console.log(`[scraper] extra sources returned ${extraStreams.length} streams in ${Date.now() - startTime}ms`);
 
-  // Merge: PenguPlay (rewritten) + HdHub (already rewritten) + extra streams
+  // Merge: PenguPlay (rewritten) + HdHub (already rewritten) + backend + extra streams
   const rewrittenPengu = penguStreams.map((s) => rewritePenguStream(s, baseUrl));
-  const allStreams = [...rewrittenPengu, ...hdhubStreams, ...extraStreams];
-  console.log(`[scraper] merged: ${rewrittenPengu.length} pengu + ${hdhubStreams.length} hdhub + ${extraStreams.length} extra = ${allStreams.length} total`);
+  const allStreams = [...rewrittenPengu, ...hdhubStreams, ...backendStreams, ...extraStreams];
+  console.log(`[scraper] merged: ${rewrittenPengu.length} pengu + ${hdhubStreams.length} hdhub + ${backendStreams.length} backend + ${extraStreams.length} extra = ${allStreams.length} total`);
 
   // FILTER OUT:
   //   - Donation banners (streams with externalUrl instead of url)
