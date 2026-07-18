@@ -306,6 +306,9 @@ const EXTRA_SOURCES = [
   { slug: 'moviedrive', name: 'MovieDrive', homepage: 'https://moviedrive.org', searchPath: '/?s={query}', type: 'movie_series' },
   { slug: 'moviesmod', name: 'MoviesMod', homepage: 'https://moviesmod.at', searchPath: '/?s={query}', type: 'movie_series' },
   { slug: 'anighar', name: 'AniGhar', homepage: 'https://anighar.cloud', searchPath: '/?s={query}', type: 'anime' },
+  // New anime sources
+  { slug: 'skyanime', name: 'SkyAnime', homepage: 'https://iamlegend.vercel.app', searchPath: '/search?q={query}', type: 'anime' },
+  { slug: 'animesky', name: 'AnimeSky', homepage: 'https://animesky.top', searchPath: '/?s={query}', type: 'anime' },
   // Embed sources that resolve via HLS (fast)
   { slug: 'vidsrc', name: 'VidSrc', homepage: 'https://vidsrc.win', searchPath: '/embed/movie/{imdb}', type: 'embed' },
   { slug: 'vidbox', name: 'VidBox', homepage: 'https://vidbox.dev', searchPath: '/embed/movie/{imdb}', type: 'embed' },
@@ -706,7 +709,13 @@ async function fetchPenguStreams(target, userConfig) {
   if (target.type === 'series') {
     penguId = `${target.imdbId}:${target.season}:${target.episode}`;
   } else if (target.type === 'anime') {
-    return [];
+    // PenguPlay doesn't support kitsu: IDs — but if we have an IMDb ID, use it
+    // (anime content is searched via title → IMDb conversion in resolveStreams)
+    if (target.imdbId && target.imdbId.startsWith('tt')) {
+      penguId = target.imdbId;
+    } else {
+      return [];
+    }
   } else {
     penguId = target.imdbId;
   }
@@ -1213,19 +1222,57 @@ function parseStremioId(type, rawId) {
 async function resolveTitle(target) {
   try {
     if (target.type === 'anime' && target.kitsuId) {
-      const res = await fetch(`https://v3-cinemeta.strem.io/meta/anime/kitsu:${target.kitsuId}.json`, {
-        signal: AbortSignal.timeout(5000),
-      });
-      const data = await res.json();
-      return data?.meta?.name || '';
+      // Try Cinemeta first (follows redirects)
+      try {
+        const res = await fetch(`https://v3-cinemeta.strem.io/meta/anime/kitsu:${target.kitsuId}.json`, {
+          signal: AbortSignal.timeout(5000),
+          redirect: 'follow',
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const name = data?.meta?.name || '';
+          if (name) return name;
+        }
+      } catch {}
+
+      // Fallback: Kitsu API directly
+      try {
+        const res = await fetch(`https://kitsu.io/api/edge/anime/${target.kitsuId}`, {
+          signal: AbortSignal.timeout(5000),
+          headers: { Accept: 'application/vnd.api+json' },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const name = data?.data?.attributes?.canonicalTitle || data?.data?.attributes?.titles?.en || '';
+          if (name) return name;
+        }
+      } catch {}
+
+      // Fallback 2: Jikan API (unofficial MAL API — no key needed)
+      // Search by kitsu ID → MAL ID → title
+      try {
+        const res = await fetch(`https://api.jikan.moe/v4/anime?q=${target.kitsuId}&limit=1`, {
+          signal: AbortSignal.timeout(5000),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const anime = data?.data?.[0];
+          const name = anime?.title_english || anime?.title || '';
+          if (name) return name;
+        }
+      } catch {}
+      return '';
     }
     if (target.imdbId) {
       const metaType = target.type === 'series' ? 'series' : 'movie';
       const res = await fetch(`https://v3-cinemeta.strem.io/meta/${metaType}/${target.imdbId}.json`, {
         signal: AbortSignal.timeout(5000),
+        redirect: 'follow',
       });
       const data = await res.json();
-      return data?.meta?.name || '';
+      const name = data?.meta?.name || '';
+      const year = data?.meta?.year || '';
+      return year ? `${name} ${year}` : name;
     }
   } catch {}
   return '';
@@ -1243,17 +1290,35 @@ async function resolveStreams(target, userConfig, baseUrl) {
   const title = await resolveTitle(target);
   console.log(`  resolved title: '${title}'`);
 
-  // Filter extra sources by content type
+  // ANIME FIX: If this is an anime (kitsu: ID), convert it to a title-based search
+  // PenguPlay and HdHub don't support kitsu: IDs, but they DO have anime content
+  // if you search by title (e.g., "Attack on Titan", "Death Note")
+  // So we create a "virtual" movie/series target with the anime's title
+  let searchTarget = target;
+  if (target.type === 'anime' && target.kitsuId && title) {
+    // Try searching as a movie first (many anime are movies)
+    searchTarget = {
+      ...target,
+      type: 'movie',
+      imdbId: null,  // Clear kitsu — search by title only
+      kitsuId: null,
+    };
+    console.log(`  [anime] converted kitsu:${target.kitsuId} → title search: "${title}"`);
+  }
+
+  // Filter extra sources — for anime, search ALL sources (not just anime-type)
+  // because many movie sites also host anime movies
   const extraCandidates = EXTRA_SOURCES.filter((s) => {
-    if (target.type === 'anime') return s.type === 'anime' || s.type === 'embed';
+    // For anime, include all source types (movie sites often have anime movies)
+    if (target.type === 'anime') return s.type === 'anime' || s.type === 'movie_series' || s.type === 'embed';
     return s.type === 'movie_series' || s.type === 'embed';
   });
 
   // Start ALL THREE in parallel: PenguPlay + HdHub + 24 extra scrapers
   console.log(`[scraper] starting PenguPlay + HdHub + ${extraCandidates.length} extra sources in parallel`);
 
-  // 1. PenguPlay proxy (returns 21+ streams in ~1s)
-  const penguPromise = fetchPenguStreams(target, userConfig).then((streams) => {
+  // 1. PenguPlay proxy — use searchTarget (anime → title-based movie search)
+  const penguPromise = fetchPenguStreams(searchTarget, userConfig).then((streams) => {
     console.log(`[pengu] returned ${streams.length} streams in ${Date.now() - startTime}ms`);
     return streams;
   }).catch((e) => {
@@ -1261,18 +1326,15 @@ async function resolveStreams(target, userConfig, baseUrl) {
     return [];
   });
 
-  // 2. HdHub proxy (returns 50+ streams in ~1s) — NEW, merged in
-  //    HdHub supports tmdb: IDs too, so parse the raw ID with its parser
-  const hdhubTarget = parseStremioIdHdHub(target.type, target.imdbId || target.kitsuId || '');
-  if (target.season != null) hdhubTarget.season = target.season;
-  if (target.episode != null) hdhubTarget.episode = target.episode;
-  // Preserve tmdb: prefix if the original ID had it
-  if (target.rawId && target.rawId.startsWith('tmdb:')) {
-    hdhubTarget.tmdbId = target.rawId;
+  // 2. HdHub proxy — use searchTarget (anime → title-based movie search)
+  const hdhubTarget = parseStremioIdHdHub(searchTarget.type, searchTarget.imdbId || '');
+  if (searchTarget.season != null) hdhubTarget.season = searchTarget.season;
+  if (searchTarget.episode != null) hdhubTarget.episode = searchTarget.episode;
+  if (searchTarget.rawId && searchTarget.rawId.startsWith('tmdb:')) {
+    hdhubTarget.tmdbId = searchTarget.rawId;
   }
   const hdhubPromise = fetchHdHubStreams(hdhubTarget, userConfig).then((streams) => {
     console.log(`[hdhub] returned ${streams.length} streams in ${Date.now() - startTime}ms`);
-    // Rewrite each HdHub stream URL to our signed /direct/ proxy
     return streams
       .map((s) => rewriteHdHubStream(s, baseUrl))
       .filter(Boolean);  // remove nulls (broken streams)
