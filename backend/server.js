@@ -211,10 +211,14 @@ if (dbValid) {
 // ---------------------------------------------------------------------------
 // Start server
 // ---------------------------------------------------------------------------
-app.listen(PORT, () => {
+// CRITICAL: Render's port scanner looks for a log line containing the PORT
+// and expects the app to bind to 0.0.0.0 (not localhost/127.0.0.1).
+// We bind to '0.0.0.0' explicitly and log the port clearly.
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`\n=====================================================`);
   console.log(`  HerumHai Backend v1.0.0`);
   console.log(`  Listening on http://0.0.0.0:${PORT}`);
+  console.log(`  Port: ${PORT}`);
   console.log(`  Database: ${dbValid ? 'configured' : 'NOT configured (no-cache mode)'}`);
   console.log(`  TMDB API: ${process.env.TMDB_API_KEY ? 'configured' : 'not configured'}`);
   console.log(`=====================================================\n`);

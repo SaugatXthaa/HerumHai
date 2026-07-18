@@ -5,7 +5,7 @@
   "type": "module",
   "description": "HerumHai — Real-time Stremio/Nuvio stream addon optimized for Vercel Serverless Deployment.",
   "scripts": {
-    "start": "cd backend && npm install && node server.js"
+    "start": "node server.js"
   },
   "dependencies": {
     "@sparticuz/chromium": "^127.0.0",

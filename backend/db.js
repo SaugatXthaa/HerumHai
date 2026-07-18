@@ -28,12 +28,20 @@ export function getPool() {
     const host = parsed.hostname;
     console.log(`[db] Connecting to: ${host}:5432`);
 
+    // Strip sslmode from connection string — we set ssl explicitly below
+    // This avoids the pg deprecation warning:
+    //   "SECURITY WARNING: The SSL modes 'prefer', 'require', and 'verify-ca'
+    //    are treated as aliases for 'verify-full'."
+    let cleanUrl = url.replace(/[?&]sslmode=[^&]+/i, '');
+    if (cleanUrl.endsWith('?')) cleanUrl = cleanUrl.slice(0, -1);
+
     pool = new Pool({
-      connectionString: url,
+      connectionString: cleanUrl,
       max: 5,
       idleTimeoutMillis: 30_000,
       connectionTimeoutMillis: 15_000,
-      // SSL for cloud providers
+      // SSL for cloud providers — use { rejectUnauthorized: false } to avoid
+      // the pg deprecation warning about sslmode=require being treated as verify-full
       ssl: /supabase|neon|render|railway|upstash/i.test(url)
         ? { rejectUnauthorized: false }
         : undefined,

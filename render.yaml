@@ -4,9 +4,18 @@ services:
   - type: web
     name: herumhai-backend
     env: node
+    # Build command installs backend deps (express, pg, puppeteer, etc.)
+    # Runs in backend/ dir because rootDir is set below
     buildCommand: npm install
-    startCommand: cd backend && npm install && node server.js
+    # Start command runs server.js directly (deps already installed in build)
+    # Must NOT run npm install here — it delays port binding and causes
+    # "No open ports detected" error on Render
+    startCommand: node server.js
     healthCheckPath: /health
+    # Root directory is backend/ — this is CRITICAL
+    # Without it, Render runs build/start in the repo root where there are
+    # no backend deps (express, pg, etc.)
+    rootDir: backend
     envVars:
       - key: NODE_VERSION
         value: 20.0.0
@@ -14,3 +23,7 @@ services:
         sync: false
       - key: TMDB_API_KEY
         sync: false
+      - key: PORT
+        # Render automatically sets PORT, but listing it here for clarity
+        # The app reads process.env.PORT and binds to 0.0.0.0
+        value: 8080
