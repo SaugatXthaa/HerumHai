@@ -10,10 +10,12 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Push to Hub
-        uses: huggingface/hub-sync@v0.1.0
         with:
-          github_repo_id: SaugatXthaa/HerumHai
-          huggingface_repo_id: SaugatXthaa/HerumHai
-          hf_token: ${{ secrets.HF_TOKEN }}
+          fetch-depth: 0
+
+      - name: Push Code Directly
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          git remote add hf https://SaugatXthaa:$HF_TOKEN@huggingface.co/spaces/SaugatXthaa/HerumHai
+          git push hf main --force
