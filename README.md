@@ -1,14 +1,3 @@
----
-title: HerumHai
-emoji: 🚀
-colorFrom: blue
-colorTo: green
-sdk: docker
-app_port: 7860
-pinned: false
----
-
-
 # HerumHai — Vercel Serverless Addon
 
 A real-time, serverless **Stremio / Nuvio** addon that resolves direct HLS &amp; MP4 streams with anti-decoy filtering. Built for Vercel Serverless Functions using `@sparticuz/chromium` + `puppeteer-core`.
