@@ -3,9 +3,7 @@ title: HerumHai
 emoji: 🚀
 colorFrom: blue
 colorTo: green
-sdk: gradio
-sdk_version: 6.20.0
-app_file: index.js
+sdk: docker
 app_port: 7860
 pinned: false
 ---
