@@ -1,3 +1,12 @@
+---
+title: HerumHai
+emoji: 🚀
+colorFrom: blue
+colorTo: green
+sdk: docker
+app_port: 7860
+---
+
 # HerumHai Backend — Dedicated Scraping Service
 
 A dedicated backend that clones PenguPlay's architecture: continuous background scraping with PostgreSQL caching, so streams are always available even when PenguPlay/HdHub are down.
