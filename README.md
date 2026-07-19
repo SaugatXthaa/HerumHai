@@ -1,13 +1,15 @@
 ---
 title: HerumHai
-emoji: 🎬
+emoji: 🚀
 colorFrom: blue
 colorTo: green
 sdk: gradio
-sdk_version: 5.0.0
-app_file: app.py
+sdk_version: 4.44.1
+app_file: index.js
+app_port: 7860
 pinned: false
 ---
+
 
 # HerumHai — Vercel Serverless Addon
 
