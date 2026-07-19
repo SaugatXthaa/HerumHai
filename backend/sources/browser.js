@@ -28,6 +28,7 @@ async function getBrowser() {
   _browserLaunchPromise = (async () => {
     _browser = await puppeteer.launch({
       headless: true,
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
@@ -41,8 +42,7 @@ async function getBrowser() {
         '--disable-translate',
         '--mute-audio',
         '--no-first-run',
-        '--single-process',
-        '--disable-blink-features=AutomationControlled',
+          '--disable-blink-features=AutomationControlled',
         '--disable-features=IsolateOrigins,site-per-process',
       ],
       defaultViewport: { width: 1366, height: 768 },

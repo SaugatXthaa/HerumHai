@@ -402,7 +402,7 @@ export async function scrapeUniversalEmbeds(title, imdbId, type = 'movie', seaso
 // each URL returns 200/206. Dead streams are silently dropped.
 // ---------------------------------------------------------------------------
 async function validateStreamsParallel(streams) {
-  const VALIDATE_TIMEOUT = 5;  // seconds (passed to curl --max-time)
+  const VALIDATE_TIMEOUT = 8;  // seconds — increased from 5 to 8 for slower CDNs
 
   const results = await Promise.all(
     streams.map(async (stream) => {
@@ -428,8 +428,10 @@ async function validateStreamsParallel(streams) {
         const code = stdout.trim();
         // 200 = OK, 206 = Partial Content (Range request OK)
         // 2xx = success
+        // 403 = some HLS CDNs reject Range requests but still serve GET — keep these
+        //       (Stremio will try them and they'll work when fetched without Range)
         const codeNum = parseInt(code, 10);
-        if (codeNum >= 200 && codeNum < 300) {
+        if ((codeNum >= 200 && codeNum < 300) || codeNum === 403) {
           return stream;
         }
         return null;

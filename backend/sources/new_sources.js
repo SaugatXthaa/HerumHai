@@ -56,7 +56,8 @@ async function getBrowser() {
   if (_browser && _browser.connected) return _browser;
   _browser = await puppeteer.launch({
     headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--single-process', '--disable-blink-features=AutomationControlled'],
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu',  '--disable-blink-features=AutomationControlled'],
     defaultViewport: { width: 1920, height: 1080 },
   });
   return _browser;
@@ -77,12 +78,35 @@ async function scrapeWithPuppeteer(embedUrl, sourceName, title, referer) {
   });
 
   const m3u8Urls = new Set();
-  page.on('response', (resp) => {
-    const url = resp.url();
-    if (/\.m3u8(\?|$)/i.test(url) || url.includes('putgate.com') || url.includes('onlinevisibilitysystem.site') || url.includes('cdnstr')) {
-      m3u8Urls.add(url);
-      console.log(`  [${sourceName}] ✓ stream captured: ${url.slice(0, 80)}`);
-    }
+  page.on('response', async (resp) => {
+    try {
+      const url = resp.url();
+      // 1. Direct .m3u8 URLs in network traffic
+      if (/\.m3u8(\?|$)/i.test(url) || url.includes('putgate.com') || url.includes('onlinevisibilitysystem.site') || url.includes('cdnstr')) {
+        if (!m3u8Urls.has(url)) {
+          m3u8Urls.add(url);
+          console.log(`  [${sourceName}] ✓ stream captured: ${url.slice(0, 80)}`);
+        }
+        return;
+      }
+      // 2. Scan JSON/text API responses for embedded .m3u8 URLs
+      if (/\/api\/|\/ajax\/|\/sources?\b|\.json/i.test(url)) {
+        const ct = resp.headers()['content-type'] || '';
+        if (ct.includes('json') || ct.includes('text')) {
+          try {
+            const body = await resp.text();
+            const re = /https?:\/\/[^\s"'<>\]\\\)]+\.m3u8(?:\?[^\s"'<>\]\\\)]*)?/gi;
+            let m;
+            while ((m = re.exec(body)) !== null) {
+              if (!m3u8Urls.has(m[0])) {
+                m3u8Urls.add(m[0]);
+                console.log(`  [${sourceName}] ✓ HLS from JSON API: ${m[0].slice(0, 80)}`);
+              }
+            }
+          } catch {}
+        }
+      }
+    } catch {}
   });
 
   try {
@@ -101,7 +125,7 @@ async function scrapeWithPuppeteer(embedUrl, sourceName, title, referer) {
     await page.evaluate(() => {
       document.querySelectorAll('button, [role=button], [class*=play], [class*=server]').forEach((el) => { try { el.click(); } catch {} });
     });
-    await sleep(5000);
+    await sleep(8000);
 
     const streams = [...m3u8Urls].map((url) => ({
       name: `HerumHai 🎬 Auto • ${sourceName}`,

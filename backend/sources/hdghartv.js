@@ -56,7 +56,8 @@ export async function scrapeHDGharTV(title, imdbId, type = 'movie', season = nul
   // Step 2: Open in browser and capture HLS stream
   const browser = await puppeteer.launch({
     headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--single-process', '--disable-gpu'],
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',  '--disable-gpu'],
   });
 
   const page = await browser.newPage();

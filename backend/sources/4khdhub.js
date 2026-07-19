@@ -37,9 +37,10 @@ async function getBrowser() {
   if (_browser && _browser.connected) return _browser;
   _browser = await puppeteer.launch({
     headless: true,
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
     args: [
       '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
-      '--disable-gpu', '--single-process',
+      '--disable-gpu', 
     ],
     defaultViewport: { width: 1366, height: 768 },
   });
@@ -94,6 +95,11 @@ export async function scrape4KHDHub(title, imdbId, type = 'movie', season = null
 
   // Hook JSON.parse in ALL frames to capture decrypted stream data
   await page.evaluateOnNewDocument(() => {
+    // Stealth overrides — anti-bot (same as PenguPlay)
+    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+    window.chrome = window.chrome || { runtime: {} };
+    Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+    Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
     const origParse = JSON.parse;
     window.__capturedStreams = [];
     JSON.parse = function (text) {
@@ -118,7 +124,7 @@ export async function scrape4KHDHub(title, imdbId, type = 'movie', season = null
     // long-polling ad scripts prevent networkidle2 from ever firing, causing
     // 30s hangs on every request.
     await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
-    await sleep(3000);
+    await sleep(5000);
 
     // Find the watch link
     const watchLinks = await page.evaluate(() => {
@@ -137,11 +143,11 @@ export async function scrape4KHDHub(title, imdbId, type = 'movie', season = null
     const watchUrl = watchLinks[0];
     console.log(`  [4khdhub] opening: ${watchUrl.slice(0, 80)}`);
     await page.goto(watchUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
-    await sleep(5000);
+    await sleep(8000);
 
     // Step 3: Click play to trigger the player
     await page.mouse.click(640, 360).catch(() => {});
-    await sleep(3000);
+    await sleep(5000);
 
     // Also try clicking any play button
     await page.evaluate(() => {
@@ -152,7 +158,7 @@ export async function scrape4KHDHub(title, imdbId, type = 'movie', season = null
         }
       });
     });
-    await sleep(5000);
+    await sleep(8000);
 
     // Step 4: Check ALL frames for captured stream data
     for (const frame of page.frames()) {

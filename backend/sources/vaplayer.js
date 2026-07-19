@@ -27,12 +27,12 @@ async function getBrowser() {
   if (_browser && _browser.connected) return _browser;
   _browser = await puppeteer.launch({
     headless: true,
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
       '--disable-gpu',
-      '--single-process',
       '--disable-blink-features=AutomationControlled',
       '--disable-features=IsolateOrigins,site-per-process',
     ],
@@ -86,19 +86,42 @@ export async function scrapeVAPlayer(title, imdbId, type = 'movie', season = nul
   const m3u8Urls = new Set();
   const putgateUrls = new Set();
 
-  // Capture ALL network responses
+  // Capture ALL network responses — .m3u8 + putgate + JSON API scanning
   page.on('response', async (resp) => {
     try {
       const url = resp.url();
-      // Direct .m3u8 URLs
+      // 1. Direct .m3u8 URLs
       if (/\.m3u8(\?|$)/i.test(url)) {
-        m3u8Urls.add(url);
-        console.log(`  [vaplayer] ✓ HLS captured: ${url.slice(0, 80)}`);
+        if (!m3u8Urls.has(url)) {
+          m3u8Urls.add(url);
+          console.log(`  [vaplayer] ✓ HLS captured: ${url.slice(0, 80)}`);
+        }
+        return;
       }
-      // putgate.com / onlinevisibilitysystem.site URLs (these return m3u8 playlists)
-      if (url.includes('putgate.com') || url.includes('onlinevisibilitysystem.site')) {
-        putgateUrls.add(url);
-        console.log(`  [vaplayer] ✓ Stream URL captured: ${url.slice(0, 80)}`);
+      // 2. putgate.com / onlinevisibilitysystem.site URLs (return m3u8 playlists)
+      if (url.includes('putgate.com') || url.includes('onlinevisibilitysystem.site') || url.includes('cdnstr')) {
+        if (!putgateUrls.has(url)) {
+          putgateUrls.add(url);
+          console.log(`  [vaplayer] ✓ Stream URL captured: ${url.slice(0, 80)}`);
+        }
+        return;
+      }
+      // 3. Scan JSON/text API responses for embedded .m3u8 URLs
+      if (/\/api\/|\/ajax\/|\/sources?\b|\.json/i.test(url)) {
+        const ct = resp.headers()['content-type'] || '';
+        if (ct.includes('json') || ct.includes('text')) {
+          try {
+            const body = await resp.text();
+            const re = /https?:\/\/[^\s"'<>\]\\\)]+\.m3u8(?:\?[^\s"'<>\]\\\)]*)?/gi;
+            let m;
+            while ((m = re.exec(body)) !== null) {
+              if (!m3u8Urls.has(m[0])) {
+                m3u8Urls.add(m[0]);
+                console.log(`  [vaplayer] ✓ HLS from JSON API: ${m[0].slice(0, 80)}`);
+              }
+            }
+          } catch {}
+        }
       }
     } catch {}
   });
@@ -128,7 +151,7 @@ export async function scrapeVAPlayer(title, imdbId, type = 'movie', season = nul
         try { el.click(); } catch {}
       });
     });
-    await sleep(5000);
+    await sleep(8000);
 
     // Try clicking again (some players need 2 clicks)
     await page.evaluate(() => {
@@ -136,7 +159,7 @@ export async function scrapeVAPlayer(title, imdbId, type = 'movie', season = nul
         try { el.click(); } catch {}
       });
     });
-    await sleep(3000);
+    await sleep(5000);
 
     console.log(`  [vaplayer] captured ${m3u8Urls.size} HLS URLs, ${putgateUrls.size} putgate URLs`);
 

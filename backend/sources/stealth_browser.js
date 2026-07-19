@@ -63,6 +63,7 @@ export async function getBrowser() {
   const proxyUrl = buildProxyUrl();
   const launchOpts = {
     headless: 'new',
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
