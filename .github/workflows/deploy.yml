@@ -1,0 +1,19 @@
+name: Sync to Hugging Face Hub
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Push to Hub
+        uses: huggingface/hub-sync@v1
+        with:
+          github_repo_id: SaugatXthaa/HerumHai
+          huggingface_repo_id: SaugatXthaa/HerumHai
+          hf_token: ${{ secrets.HF_TOKEN }}
