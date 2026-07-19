@@ -25,22 +25,30 @@
 // ============================================================================
 
 import { fetchHtml, extractHubCloudIds, resolveHubCloud, detectQuality, detectAudio, formatFileSize } from './hubcloud.js';
-import { browserScrapeSource, closeBrowser } from './browser.js';
+import { browserScrapeSource, closeBrowser } from './hubcloud_browser.js';
 import { scrape4KHDHub, closeBrowser as close4KHDHubBrowser } from './4khdhub.js';
 import { scrapeHDGharTV } from './hdghartv.js';
 import { CF_BLOCKED_SOURCES, closeCFBrowser } from './cf_sources.js';
 import { scrapeAnimeSky, closeBrowser as closeAnimeSkyBrowser } from './animesky.js';
 import { scrapeUniversalEmbeds, scrapeStreameX, closeBrowser as closeUniversalBrowser } from './universal_embeds.js';
+import { scrapeVAPlayer, closeBrowser as closeVAPlayerBrowser } from './vaplayer.js';
+import { scrapeMoviesEQ, scrapeCineWave, scrapeTatvaMovies, closeBrowser as closeNewSourcesBrowser } from './new_sources.js';
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 
 // ---------------------------------------------------------------------------
-// Factory: HubCloud-based source scraper (WITH BROWSER RENDERING)
+// Factory: HubCloud-based source scraper (AXIOS FIRST — no browser needed)
 // ----------------------------------------------------------------------------
-// Uses puppeteer to render JS-heavy source websites, then extracts HubCloud
-// links from the rendered DOM. This is the SAME technique PenguPlay uses.
-// Without this, axios-only scraping returns 0 streams (JS content not loaded).
-// ---------------------------------------------------------------------------
+// Flow:
+//   1. Fetch search page with axios (fast, no browser)
+//   2. Find movie detail page links (WordPress slug pattern)
+//   3. Visit detail page with axios → extract HubCloud IDs
+//   4. Resolve HubCloud IDs → direct CDN URLs
+//   5. If no HubCloud IDs found, fall back to universal embed (xpass.top)
+//
+// This is INDEPENDENT — does NOT use PenguPlay or HdHub proxies.
+// Does NOT use puppeteer (too slow on Render free tier).
+// ============================================================================
 
 function createHubCloudSource(slug, name, homepage, searchPath, extraDetailPatterns = []) {
   return {
@@ -55,17 +63,67 @@ function createHubCloudSource(slug, name, homepage, searchPath, extraDetailPatte
       const searchUrl = homepage + searchPath.replace('{query}', query);
       console.log(`  [${slug}] → ${searchUrl.slice(0, 100)}`);
 
-      // Use browser to scrape JS-heavy source sites (same as PenguPlay)
-      const { hubcloudIds, directUrls } = await browserScrapeSource(searchUrl, slug);
-
-      if (hubcloudIds.length === 0 && directUrls.length === 0) {
-        console.log(`  [${slug}] no HubCloud IDs or direct URLs found`);
-        return [];
+      // ---------- Phase 1: Fetch search page with axios ----------
+      const searchRes = await fetchHtml(searchUrl, { timeout: 10000 });
+      if (searchRes.status !== 200 || !searchRes.body) {
+        console.log(`  [${slug}] search returned ${searchRes.status}`);
+        return [];  // universal source will handle fallback
       }
 
-      console.log(`  [${slug}] found ${hubcloudIds.length} HubCloud IDs, ${directUrls.length} direct URLs`);
+      // Extract HubCloud IDs from search page (some sites list them inline)
+      let hubcloudIds = extractHubCloudIds(searchRes.body);
 
-      // Resolve HubCloud IDs → direct CDN URLs
+      // ---------- Phase 2: Find detail page links ----------
+      // Match WordPress post URLs: /{slug}/, /download-{slug}/, /{slug}-{year}/, etc.
+      // Exclude wp-content, wp-includes, images, CSS, JS, category, page, feed, etc.
+      const allLinks = [];
+      const linkRegex = /href="(https?:\/\/[^"]+)"/gi;
+      let m;
+      while ((m = linkRegex.exec(searchRes.body)) !== null) {
+        const href = m[1];
+        // Skip non-content URLs
+        if (/wp-content|wp-includes|wp-json|\.css|\.js|\.png|\.jpg|\.gif|\.ico|googleapis|fonts\.|schema\.org|gmpg\.org|facebook|twitter|telegram|youtube|instagram|pinterest|reddit|whatsapp|t\.me|\?s=|\/category\/|\/page\/|\/feed|\/comments|#|xmlrpc|wp-login|wp-admin|cdn-cgi/i.test(href)) continue;
+        // Must be from the same domain
+        try {
+          const linkHost = new URL(href).hostname;
+          const searchHost = new URL(homepage).hostname;
+          if (!linkHost.endsWith(searchHost) && !searchHost.endsWith(linkHost)) continue;
+        } catch { continue; }
+        // Must look like a post URL (has a path with more than just /)
+        const path = new URL(href).pathname;
+        if (!path || path === '/' || path.length < 5) continue;
+        // Skip if it's just the homepage or a section page
+        if (/^\/(web-series|animation|bangla-movies|bangla-dubbed|chinese|dual-audio|english-movies|hindi-movies|2160p-hevc|4k-hdr|1080p-10bit|movies|imax|series|tv|genre|tag|author)/i.test(path)) continue;
+        allLinks.push(href);
+      }
+
+      // Dedupe and take first 3 detail links
+      const detailLinks = [...new Set(allLinks)].slice(0, 3);
+      console.log(`  [${slug}] found ${detailLinks.length} detail page candidates`);
+
+      // ---------- Phase 3: Visit detail pages, extract HubCloud IDs ----------
+      for (const detailUrl of detailLinks) {
+        if (hubcloudIds.length >= 5) break; // Stop early if we have enough
+        try {
+          console.log(`  [${slug}] → detail: ${detailUrl.slice(0, 80)}`);
+          const detailRes = await fetchHtml(detailUrl, {
+            headers: { Referer: searchUrl },
+            timeout: 10000,
+          });
+          if (detailRes.status === 200 && detailRes.body) {
+            const detailIds = extractHubCloudIds(detailRes.body);
+            for (const id of detailIds) {
+              if (!hubcloudIds.includes(id)) hubcloudIds.push(id);
+            }
+          }
+        } catch (e) {
+          console.log(`  [${slug}] detail failed: ${e.message}`);
+        }
+      }
+
+      console.log(`  [${slug}] found ${hubcloudIds.length} HubCloud IDs total`);
+
+      // ---------- Phase 4: Resolve HubCloud IDs → direct CDN URLs ----------
       const streams = [];
       for (const id of hubcloudIds.slice(0, 5)) {
         try {
@@ -96,29 +154,77 @@ function createHubCloudSource(slug, name, homepage, searchPath, extraDetailPatte
         }
       }
 
-      // Add direct 111477 URLs (wrap in p.111477.xyz/bulk proxy)
-      for (const url of directUrls.slice(0, 3)) {
-        if (url.startsWith('https://a.111477.xyz/')) {
-          const bulkUrl = `https://p.111477.xyz/bulk?u=${encodeURIComponent(url)}`;
-          const filename = url.split('/').pop() || '';
-          const quality = detectQuality(filename);
-          streams.push({
-            name: `HerumHai ${quality.rank >= 2160 ? '❄️' : '🎯'} ${quality.label} • ${name} · OD`,
-            description: `🍿 ${title}\n💾 OD Direct\n🎬 ${filename}`,
-            url: bulkUrl,
-            behaviorHints: {
-              notWebReady: true,
-              filename,
-              proxyHeaders: {
-                request: {
-                  'User-Agent': USER_AGENT,
-                  'Referer': 'https://a.111477.xyz/',
+      // ---------- Phase 5: If axios found 0 HubCloud IDs, try browser (puppeteer) ----------
+      // Many sites are JS-rendered or CF-protected — axios can't get the content.
+      // Puppeteer renders the page (same as PenguPlay) and extracts HubCloud IDs.
+      if (hubcloudIds.length === 0 && streams.length === 0) {
+        console.log(`  [${slug}] axios found 0 IDs — trying browser (puppeteer)`);
+        try {
+          const { hubcloudIds: browserIds, directUrls: browserDirectUrls } = await browserScrapeSource(searchUrl, slug);
+          // Add browser-found IDs
+          for (const id of browserIds) {
+            if (!hubcloudIds.includes(id)) hubcloudIds.push(id);
+          }
+          // Resolve browser-found HubCloud IDs
+          for (const id of browserIds.slice(0, 5)) {
+            try {
+              const resolved = await resolveHubCloud(id);
+              if (resolved && resolved.directUrl) {
+                const quality = detectQuality(resolved.filename || resolved.directUrl);
+                const audio = detectAudio(resolved.filename);
+                streams.push({
+                  name: `HerumHai ${quality.rank >= 2160 ? '❄️' : '🎯'} ${quality.label} • ${name}`,
+                  description: `🍿 ${title}\n💾 ${formatFileSize(resolved.fileSize)}\n🎧 Audio: ${audio.join(', ')}`,
+                  url: resolved.directUrl,
+                  behaviorHints: {
+                    notWebReady: true,
+                    filename: resolved.filename || '',
+                    videoSize: resolved.fileSize || 0,
+                    proxyHeaders: {
+                      request: {
+                        'User-Agent': USER_AGENT,
+                        'Referer': resolved.referer || 'https://hubcloud.cx/',
+                      },
+                    },
+                  },
+                  sourceSlug: slug,
+                });
+              }
+            } catch (e) {
+              console.log(`  [${slug}] hubcloud ${id} failed: ${e.message}`);
+            }
+          }
+          // Add direct 111477 URLs from browser
+          for (const url of browserDirectUrls.slice(0, 3)) {
+            if (url.startsWith('https://a.111477.xyz/')) {
+              const bulkUrl = `https://p.111477.xyz/bulk?u=${encodeURIComponent(url)}`;
+              const filename = url.split('/').pop() || '';
+              const quality = detectQuality(filename);
+              streams.push({
+                name: `HerumHai ${quality.rank >= 2160 ? '❄️' : '🎯'} ${quality.label} • ${name} · OD`,
+                description: `🍿 ${title}\n💾 OD Direct\n🎬 ${filename}`,
+                url: bulkUrl,
+                behaviorHints: {
+                  notWebReady: true,
+                  filename,
+                  proxyHeaders: {
+                    request: {
+                      'User-Agent': USER_AGENT,
+                      'Referer': 'https://a.111477.xyz/',
+                    },
+                  },
                 },
-              },
-            },
-            sourceSlug: slug,
-          });
+                sourceSlug: slug,
+              });
+            }
+          }
+        } catch (e) {
+          console.log(`  [${slug}] browser scrape failed: ${e.message}`);
         }
+      }
+
+      if (streams.length === 0) {
+        console.log(`  [${slug}] no HubCloud streams found (universal source will handle embed fallback)`);
       }
 
       console.log(`  [${slug}] found ${streams.length} streams`);
@@ -174,6 +280,71 @@ export const ALL_SOURCES = [
       }
       const type = target.type === 'anime' ? 'series' : target.type;
       return scrapeStreameX(title, imdbId, type, target.season, target.episode, kitsuId);
+    },
+  },
+
+  // VAPlayer — puppeteer-based scraper (same approach as PenguPlay)
+  // Uses vaplayer.ru → nextgencloudfabric.com → putgate.com / onlinevisibilitysystem.site
+  // Captures .m3u8 URLs from network traffic after CF bypass (6s wait + 8s + reload)
+  {
+    slug: 'vaplayer',
+    name: 'VAPlayer',
+    homepage: 'https://vaplayer.ru',
+    searchPath: '/embed/movie/{imdb}',
+    type: 'embed',
+    async scrape(target, title) {
+      const imdbId = target.imdbId || (target.rawId && target.rawId.startsWith('tt') ? target.rawId : null);
+      if (!imdbId) {
+        console.log(`  [vaplayer] no IMDB ID — cannot scrape`);
+        return [];
+      }
+      const type = target.type === 'anime' ? 'series' : target.type;
+      return scrapeVAPlayer(title, imdbId, type, target.season, target.episode);
+    },
+  },
+
+  // MoviesEQ — movieseq.com (uses nextgencloudfabric.com embed = same as VAPlayer)
+  {
+    slug: 'movieseq',
+    name: 'MoviesEQ',
+    homepage: 'https://movieseq.com',
+    searchPath: '/embed/movie/{tmdb}',
+    type: 'embed',
+    async scrape(target, title) {
+      const imdbId = target.imdbId || (target.rawId && target.rawId.startsWith('tt') ? target.rawId : null);
+      if (!imdbId) return [];
+      const type = target.type === 'anime' ? 'series' : target.type;
+      return scrapeMoviesEQ(title, imdbId, type, target.season, target.episode);
+    },
+  },
+
+  // CineWave — watch.cinewave.qzz.io (uses airflix1.com + cinemaos.tech embeds)
+  {
+    slug: 'cinewave',
+    name: 'CineWave',
+    homepage: 'https://watch.cinewave.qzz.io',
+    searchPath: '/embed/movie/{imdb}',
+    type: 'embed',
+    async scrape(target, title) {
+      const imdbId = target.imdbId || (target.rawId && target.rawId.startsWith('tt') ? target.rawId : null);
+      if (!imdbId) return [];
+      const type = target.type === 'anime' ? 'series' : target.type;
+      return scrapeCineWave(title, imdbId, type, target.season, target.episode);
+    },
+  },
+
+  // TatvaMovies — tatvamovies.vercel.app (uses nxsha.space + vaplayer.ru embeds)
+  {
+    slug: 'tatvamovies',
+    name: 'TatvaMovies',
+    homepage: 'https://tatvamovies.vercel.app',
+    searchPath: '/embed/movie/{tmdb}',
+    type: 'embed',
+    async scrape(target, title) {
+      const imdbId = target.imdbId || (target.rawId && target.rawId.startsWith('tt') ? target.rawId : null);
+      if (!imdbId) return [];
+      const type = target.type === 'anime' ? 'series' : target.type;
+      return scrapeTatvaMovies(title, imdbId, type, target.season, target.episode);
     },
   },
 
@@ -395,12 +566,14 @@ export async function scrapeAllSources(target, title, timeoutMs = 25000) {
     }
   }
 
-  // Close browsers to free memory (legacy + stealth + animesky + universal + 4khdhub)
+  // Close browsers to free memory
   await closeBrowser().catch(() => {});
   await close4KHDHubBrowser().catch(() => {});
   await closeCFBrowser().catch(() => {});
   await closeAnimeSkyBrowser().catch(() => {});
   await closeUniversalBrowser().catch(() => {});
+  await closeVAPlayerBrowser().catch(() => {});
+  await closeNewSourcesBrowser().catch(() => {});
 
   console.log(`[sources] total: ${unique.length} unique streams from ${candidates.length} sources`);
   return unique;

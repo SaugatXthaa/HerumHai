@@ -157,36 +157,24 @@ async function scrapeIndependent(type, id, title) {
 // ---------------------------------------------------------------------------
 // Main scrape function — fetches from ALL sources, merges, caches
 // ---------------------------------------------------------------------------
+// FULLY INDEPENDENT — does NOT depend on PenguPlay or HdHub proxies.
+// Uses ONLY our own 34+ cloned sources (universal embeds, AnimeSky,
+// 4KHDHub, HubCloud resolvers, etc.)
+// ---------------------------------------------------------------------------
 export async function scrapeTitle(type, ids, season, episode, title) {
   const start = Date.now();
   console.log(`\n[scraper] scraping ${type} ${ids.imdbId || ids.tmdbId || ids.kitsuId} (${title || 'unknown'})`);
 
-  // Build the ID string for PenguPlay/HdHub (bonus sources)
-  let idStr;
-  if (type === 'series') {
-    idStr = `${ids.imdbId}:${season}:${episode}`;
-  } else if (type === 'anime') {
-    idStr = ids.kitsuId ? `kitsu:${ids.kitsuId}:${episode || 1}` : null;
-  } else {
-    idStr = ids.tmdbId || ids.imdbId;
-  }
-
-  // Fetch from ALL sources IN PARALLEL:
-  // 1. CLONED SOURCES (34 sources — PRIMARY, independent of PenguPlay/HdHub)
-  // 2. PenguPlay proxy (BONUS — adds streams when available)
-  // 3. HdHub proxy (BONUS — adds OD direct CDN streams)
+  // Fetch from our CLONED SOURCES ONLY (34 sources — PRIMARY, independent)
+  // No PenguPlay proxy, no HdHub proxy — fully independent.
   // BUGFIX: pass kitsuId in the target so universal/animesky sources can use it
-  const [clonedStreams, penguStreams, hdhubStreams] = await Promise.all([
-    scrapeAllSources({ type, ...ids, season, episode }, title, 15000).catch((e) => {
-      console.log(`[scraper] cloned sources error: ${e.message}`);
-      return [];
-    }),
-    idStr ? fetchFromPenguPlay(type, idStr).catch(() => []) : Promise.resolve([]),
-    idStr ? fetchFromHdHub(type, idStr).catch(() => []) : Promise.resolve([]),
-  ]);
+  const clonedStreams = await scrapeAllSources({ type, ...ids, season, episode }, title, 15000).catch((e) => {
+    console.log(`[scraper] cloned sources error: ${e.message}`);
+    return [];
+  });
 
-  // Merge all streams
-  const allStreams = [...clonedStreams, ...penguStreams, ...hdhubStreams];
+  // Merge all streams (cloned sources only — no proxy dependencies)
+  const allStreams = [...clonedStreams];
 
   // Dedupe by URL
   const seen = new Set();
@@ -199,7 +187,7 @@ export async function scrapeTitle(type, ids, season, episode, title) {
   }
 
   const duration = Date.now() - start;
-  console.log(`[scraper] done: ${unique.length} streams (${clonedStreams.length} cloned + ${penguStreams.length} pengu + ${hdhubStreams.length} hdhub) in ${duration}ms`);
+  console.log(`[scraper] done: ${unique.length} streams (${clonedStreams.length} cloned) in ${duration}ms`);
 
   // Cache in database
   if (unique.length > 0) {

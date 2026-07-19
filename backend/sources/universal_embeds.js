@@ -309,24 +309,17 @@ export async function scrapeUniversalEmbeds(title, imdbId, type = 'movie', seaso
   }
   console.log(`  [universal] found ${playlistUrls.length} playlist URLs (primary + backups)`);
 
-  // Step 3: Fetch each playlist (sequentially with early exit) and collect unique stream URLs
-  // NOTE: Many xpass.top providers (TIK, VID, WIS) are frequently dead (404/403).
-  // We fetch MORE playlists (up to 15) and collect MORE raw streams (up to 12),
-  // then the validation step filters out dead ones. This ensures we end up with
-  // 3-5 validated working streams even when half the providers are offline.
+  // Step 3: Fetch ALL playlists (no early exit — we want maximum streams)
+  // Many xpass.top providers (TIK, VID, WIS) are frequently dead (404/403).
+  // We fetch ALL playlists to collect as many raw streams as possible,
+  // then the validation step filters out dead ones.
   const allSources = [];
-  const MAX_PLAYLISTS = 15;
-  const TARGET_STREAMS = 10;  // stop early once we have 10+ unique raw streams
+  const MAX_PLAYLISTS = 30;  // fetch all playlists (xpass.top returns up to 35)
   for (const url of playlistUrls.slice(0, MAX_PLAYLISTS)) {
     const streams = fetchPlaylistStreams(url, embedUrl);
     if (streams.length > 0) {
       allSources.push(...streams);
       console.log(`  [universal] ✓ ${url.slice(0, 50)}... → ${streams.length} sources`);
-      // Early exit if we have enough raw streams (validation will filter dead ones)
-      if (allSources.length >= TARGET_STREAMS) {
-        console.log(`  [universal] reached ${TARGET_STREAMS}+ raw sources — stopping early`);
-        break;
-      }
     }
   }
 

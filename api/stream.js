@@ -1365,10 +1365,30 @@ async function resolveStreams(target, userConfig, baseUrl) {
     return s.type === 'movie_series' || s.type === 'embed';
   });
 
-  // Start ALL THREE in parallel: PenguPlay + HdHub + 24 extra scrapers
-  console.log(`[scraper] starting PenguPlay + HdHub + ${extraCandidates.length} extra sources in parallel`);
+  // ===========================================================================
+  // HYBRID ARCHITECTURE — Our scrapers PRIMARY + PenguPlay/HdHub SECONDARY
+  // ===========================================================================
+  // 1. Backend (Render) — PRIMARY — our 34+ independent scrapers
+  // 2. Extra sources — 24 independent WordPress/SPA scrapers
+  // 3. PenguPlay proxy — SECONDARY — adds extra streams (HubCloud GDrive links)
+  // 4. HdHub proxy — SECONDARY — adds OD direct CDN streams
+  //
+  // Our independent sources run FIRST. PenguPlay/HdHub fill in EXTRA streams
+  // so the user gets maximum choice. If PenguPlay/HdHub go down, our sources
+  // still work.
+  // ===========================================================================
+  console.log(`[scraper] starting backend + ${extraCandidates.length} extra + PenguPlay + HdHub`);
 
-  // 1. PenguPlay proxy — use searchTarget (anime → title-based movie search)
+  // 1. Backend sources (PRIMARY — universal embeds + AnimeSky + 4KHDHub + 30 more)
+  const backendPromise = fetchBackendStreams(target).then((streams) => {
+    console.log(`[backend] returned ${streams.length} streams in ${Date.now() - startTime}ms`);
+    return streams;
+  }).catch((e) => {
+    console.log(`[backend] failed (graceful degradation): ${e.message}`);
+    return [];
+  });
+
+  // 1b. PenguPlay proxy (SECONDARY — adds HubCloud GDrive streams)
   const penguPromise = fetchPenguStreams(searchTarget, userConfig).then((streams) => {
     console.log(`[pengu] returned ${streams.length} streams in ${Date.now() - startTime}ms`);
     return streams;
@@ -1377,7 +1397,7 @@ async function resolveStreams(target, userConfig, baseUrl) {
     return [];
   });
 
-  // 2. HdHub proxy — use searchTarget (anime → title-based movie search)
+  // 1c. HdHub proxy (SECONDARY — adds OD direct CDN streams)
   const hdhubTarget = parseStremioIdHdHub(searchTarget.type, searchTarget.imdbId || '');
   if (searchTarget.season != null) hdhubTarget.season = searchTarget.season;
   if (searchTarget.episode != null) hdhubTarget.episode = searchTarget.episode;
@@ -1388,13 +1408,13 @@ async function resolveStreams(target, userConfig, baseUrl) {
     console.log(`[hdhub] returned ${streams.length} streams in ${Date.now() - startTime}ms`);
     return streams
       .map((s) => rewriteHdHubStream(s, baseUrl))
-      .filter(Boolean);  // remove nulls (broken streams)
+      .filter(Boolean);
   }).catch((e) => {
     console.log(`[hdhub] failed (graceful degradation): ${e.message}`);
     return [];
   });
 
-  // 3. Extra source scrapers (24 sources, browser fallback for CF)
+  // 2. Extra source scrapers (24 independent sources — backup)
   const extraPromises = extraCandidates.map((source) =>
     Promise.race([
       scrapeExtraSource(source, target, title),
@@ -1405,20 +1425,8 @@ async function resolveStreams(target, userConfig, baseUrl) {
     ])
   );
 
-  // 3b. Backend sources (universal embeds via xpass.top + AnimeSky + 4KHDHub fallback)
-  // The backend has dedicated scrapers that work for anime (kitsu→TMDB resolution),
-  // movies, and TV series via play.xpass.top. This is the HIGHEST-YIELD source.
-  // Runs in parallel with everything else.
-  const backendPromise = fetchBackendStreams(target).then((streams) => {
-    console.log(`[backend] returned ${streams.length} streams in ${Date.now() - startTime}ms`);
-    return streams;
-  }).catch((e) => {
-    console.log(`[backend] failed (graceful degradation): ${e.message}`);
-    return [];
-  });
-
-  // Wait for all three in parallel
-  const [penguStreams, hdhubStreams, backendStreams] = await Promise.all([penguPromise, hdhubPromise, backendPromise]);
+  // Wait for ALL sources in parallel
+  const [backendStreams, penguStreams, hdhubStreams] = await Promise.all([backendPromise, penguPromise, hdhubPromise]);
 
   // Wait for extra sources (with total budget)
   const extraBudgetTimer = new Promise((resolve) => setTimeout(resolve, EXTRA_TOTAL_BUDGET_MS));
@@ -1433,10 +1441,10 @@ async function resolveStreams(target, userConfig, baseUrl) {
   const extraStreams = (await Promise.all(extraResults)).flat();
   console.log(`[scraper] extra sources returned ${extraStreams.length} streams in ${Date.now() - startTime}ms`);
 
-  // Merge: PenguPlay (rewritten) + HdHub (already rewritten) + backend + extra streams
+  // Merge: backend (primary) + pengu (secondary) + hdhub (secondary) + extra (backup)
   const rewrittenPengu = penguStreams.map((s) => rewritePenguStream(s, baseUrl));
-  const allStreams = [...rewrittenPengu, ...hdhubStreams, ...backendStreams, ...extraStreams];
-  console.log(`[scraper] merged: ${rewrittenPengu.length} pengu + ${hdhubStreams.length} hdhub + ${backendStreams.length} backend + ${extraStreams.length} extra = ${allStreams.length} total`);
+  const allStreams = [...backendStreams, ...rewrittenPengu, ...hdhubStreams, ...extraStreams];
+  console.log(`[scraper] merged: ${backendStreams.length} backend + ${rewrittenPengu.length} pengu + ${hdhubStreams.length} hdhub + ${extraStreams.length} extra = ${allStreams.length} total`);
 
   // FILTER OUT:
   //   - Donation banners (streams with externalUrl instead of url)
