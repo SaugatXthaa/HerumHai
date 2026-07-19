@@ -1,21 +1,21 @@
-name: Push to Hugging Face
+name: Sync to Hugging Face Hub
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
 
 jobs:
-  sync-to-hf:
+  deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          lfs: true
+          lfs: true # This natively handles your binary/image files
 
-      - name: Force Push to Space Hub
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: |
-          git push --force https://SaugatXthaa:$HF_TOKEN@huggingface.co/spaces/SaugatXthaa/HerumHai main
+      - name: Push to Hub
+        uses: huggingface/hub-sync@v1
+        with:
+          github_repo_id: SaugatXthaa/HerumHai
+          huggingface_repo_id: SaugatXthaa/HerumHai
+          hf_token: ${{ secrets.HF_TOKEN }}
