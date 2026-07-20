@@ -82,7 +82,7 @@ async function scrapeWithPuppeteer(embedUrl, sourceName, title, referer) {
     try {
       const url = resp.url();
       // 1. Direct .m3u8 URLs in network traffic
-      if (/\.m3u8(\?|$)/i.test(url) || url.includes('putgate.com') || url.includes('onlinevisibilitysystem.site') || url.includes('cdnstr')) {
+      if (/\.m3u8(\?|$)/i.test(url) || url.includes('putgate.com') || url.includes('onlinevisibilitysystem.site') || url.includes('cdnstr') || url.includes('proxy.itsnitrox.tech') || url.includes('itsnitrox')) {
         if (!m3u8Urls.has(url)) {
           m3u8Urls.add(url);
           console.log(`  [${sourceName}] ✓ stream captured: ${url.slice(0, 80)}`);

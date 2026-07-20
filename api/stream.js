@@ -1561,6 +1561,95 @@ async function resolveStreams(target, userConfig, baseUrl) {
 }
 
 // ---------------------------------------------------------------------------
+// Quality Filter + Stream Formatter
+// ----------------------------------------------------------------------------
+// Applies the user's quality selection (res_2160, res_1080, etc.) and
+// nameTemplate/descriptionTemplate from the Configure-WebUI to ALL streams
+// (both our own scraped streams AND PenguPlay/HdHub proxied streams).
+// ---------------------------------------------------------------------------
+
+function filterByQuality(streams, userConfig) {
+  // If no quality filters are set, return all streams
+  const hasFilter = ['res_2160','res_1440','res_1080','res_720','res_576','res_480','res_360','res_240','res_144']
+    .some(k => k in userConfig);
+  if (!hasFilter) return streams;
+
+  // Build allowed resolutions
+  const allowed = new Set();
+  if (userConfig.res_2160) allowed.add('2160p'); allowed.add('4k'); allowed.add('uhd');
+  if (userConfig.res_1440) allowed.add('1440p'); allowed.add('2k');
+  if (userConfig.res_1080) allowed.add('1080p'); allowed.add('fhd');
+  if (userConfig.res_720) allowed.add('720p'); allowed.add('hd');
+  if (userConfig.res_576) allowed.add('576p');
+  if (userConfig.res_480) allowed.add('480p'); allowed.add('sd');
+  if (userConfig.res_360) allowed.add('360p');
+  if (userConfig.res_240) allowed.add('240p');
+  if (userConfig.res_144) allowed.add('144p');
+
+  // If ALL are selected, return all
+  if (allowed.size === 0 || allowed.has('all')) return streams;
+
+  return streams.filter(s => {
+    const text = ((s.name || '') + ' ' + (s.description || '') + ' ' + (s.behaviorHints?.filename || '')).toLowerCase();
+    // HLS master playlists contain all qualities — always include
+    if (s.url && s.url.includes('.m3u8') && !text.includes('480p') && !text.includes('720p') && !text.includes('1080p')) return true;
+    // Check if any allowed quality keyword matches
+    for (const q of allowed) {
+      if (text.includes(q)) return true;
+    }
+    // If no quality info in stream, include it (better to show than hide)
+    if (!text.includes('2160p') && !text.includes('1080p') && !text.includes('720p') && !text.includes('480p') && !text.includes('360p')) return true;
+    return false;
+  });
+}
+
+function formatStreams(streams, userConfig, title) {
+  const nameTpl = userConfig.nameTemplate;
+  const descTpl = userConfig.descriptionTemplate;
+  if (!nameTpl && !descTpl) return streams;
+
+  // Extract stream info from name/description
+  function extractInfo(s) {
+    const text = (s.name || '') + ' ' + (s.description || '') + ' ' + (s.behaviorHints?.filename || '');
+    const resolution = (text.match(/2160p|4k/i) ? '2160p' :
+                       text.match(/1440p|2k/i) ? '1440p' :
+                       text.match(/1080p/i) ? '1080p' :
+                       text.match(/720p/i) ? '720p' :
+                       text.match(/480p/i) ? '480p' :
+                       text.match(/360p/i) ? '360p' : 'Auto');
+    const source = (s.sourceSlug || 'HerumHai');
+    const sizeMatch = text.match(/([\d.]+)\s*(GB|MB|TB)/i);
+    const size = sizeMatch ? sizeMatch[0] : 'Unknown';
+    const provider = source;
+    const year = ''; // Not available in stream data
+    return { resolution, source, size, provider, year, title: title || '' };
+  }
+
+  // Simple template replacement
+  function applyTemplate(tpl, info) {
+    if (!tpl) return null;
+    return tpl
+      .replace(/\{stream\.title\}/g, info.title)
+      .replace(/\{stream\.year\}/g, info.year)
+      .replace(/\{stream\.resolution\}/g, info.resolution)
+      .replace(/\{stream\.source\}/g, info.source)
+      .replace(/\{stream\.size\}/g, info.size)
+      .replace(/\{stream\.provider\}/g, info.provider);
+  }
+
+  return streams.map(s => {
+    const info = extractInfo(s);
+    const newName = applyTemplate(nameTpl, info);
+    const newDesc = applyTemplate(descTpl, info);
+    return {
+      ...s,
+      ...(newName ? { name: newName } : {}),
+      ...(newDesc ? { description: newDesc } : {}),
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Vercel Serverless Function Entry
 // ----------------------------------------------------------------------------
 
@@ -1600,6 +1689,10 @@ export default async function handler(req, res) {
         k === 'downloads_only' || k === 'torbox' || k === 'qualities' || k === 'sort') {
       userConfig[k] = v !== 'false' && v !== '0' && v !== 'unchecked';
     }
+    // Capture formatter templates (from Configure-WebUI)
+    if (k === 'nameTemplate' || k === 'descriptionTemplate') {
+      userConfig[k] = v;
+    }
   }
 
   const target = parseStremioId(parsedType, parsedId);
@@ -1625,7 +1718,20 @@ export default async function handler(req, res) {
   console.log(`[cache] MISS — fetching fresh streams`);
 
   try {
-    const streams = await resolveStreams(target, userConfig, baseUrl);
+    let streams = await resolveStreams(target, userConfig, baseUrl);
+
+    // Apply quality filter from Configure-WebUI (res_2160, res_1080, etc.)
+    streams = filterByQuality(streams, userConfig);
+    console.log(`[quality-filter] ${streams.length} streams after quality filter`);
+
+    // Apply stream formatter from Configure-WebUI (nameTemplate, descriptionTemplate)
+    // Resolve title for the formatter (needed for {stream.title} placeholder)
+    let formatTitle = '';
+    try {
+      formatTitle = await resolveTitle(target);
+    } catch {}
+    streams = formatStreams(streams, userConfig, formatTitle || '');
+    console.log(`[formatter] applied nameTemplate/descriptionTemplate to ${streams.length} streams`);
 
     // Cache the result (non-blocking) — but only if we got streams
     if (streams.length > 0) {

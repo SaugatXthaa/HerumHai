@@ -1,358 +1,439 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>HerumHai — Stremio / Nuvio Addon</title>
-  <meta name="description" content="HerumHai — Real-time serverless stream resolver with anti-decoy filtering." />
-  <link rel="icon" href="/logo.png" />
-  <link rel="apple-touch-icon" href="/logo.png" />
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-
-    :root {
-      --bg: #0a0a0f;
-      --panel: rgba(19, 19, 26, 0.6);
-      --border: rgba(255, 255, 255, 0.06);
-      --text: #e4e4e7;
-      --muted: #71717a;
-      --accent: #7c3aed;
-      --accent2: #ec4899;
-    }
-
-    body {
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background:
-        radial-gradient(ellipse at top, #1a1a2e 0%, #0a0a0f 60%),
-        #0a0a0f;
-      color: var(--text);
-      min-height: 100vh;
-      -webkit-font-smoothing: antialiased;
-      -moz-osx-font-smoothing: grayscale;
-    }
-
-    .container {
-      max-width: 720px;
-      margin: 0 auto;
-      padding: 80px 24px 40px;
-      text-align: center;
-    }
-
-    .badge {
-      display: inline-block;
-      padding: 4px 12px;
-      border-radius: 999px;
-      background: rgba(124, 58, 237, 0.1);
-      border: 1px solid rgba(124, 58, 237, 0.2);
-      font-size: 12px;
-      color: #a78bfa;
-      margin-bottom: 24px;
-      letter-spacing: 0.5px;
-    }
-
-    .logo {
-      width: 130px;
-      height: 130px;
-      margin: 0 auto 24px;
-      border-radius: 24px;
-      overflow: hidden;
-      background: linear-gradient(135deg, rgba(124, 58, 237, 0.15) 0%, rgba(236, 72, 153, 0.15) 100%);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      box-shadow: 0 20px 60px -20px rgba(124, 58, 237, 0.5);
-      padding: 12px;
-    }
-
-    .logo img {
-      width: 100%;
-      height: 100%;
-      object-fit: contain;
-      display: block;
-    }
-
-    h1 {
-      font-size: clamp(32px, 6vw, 56px);
-      font-weight: 800;
-      letter-spacing: -0.02em;
-      line-height: 1.05;
-      margin-bottom: 16px;
-    }
-
-    .gradient-text {
-      background: linear-gradient(135deg, #a78bfa 0%, #f472b6 100%);
-      -webkit-background-clip: text;
-      background-clip: text;
-      color: transparent;
-    }
-
-    .tagline {
-      font-size: 18px;
-      color: var(--muted);
-      max-width: 560px;
-      margin: 0 auto 40px;
-      line-height: 1.5;
-    }
-
-    .cta-group {
-      display: flex;
-      gap: 12px;
-      justify-content: center;
-      flex-wrap: wrap;
-      margin-bottom: 60px;
-    }
-
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 14px 28px;
-      border-radius: 12px;
-      font-size: 15px;
-      font-weight: 600;
-      text-decoration: none;
-      transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
-      cursor: pointer;
-      border: 1px solid transparent;
-    }
-
-    .btn-primary {
-      background: linear-gradient(135deg, var(--accent) 0%, var(--accent2) 100%);
-      color: white;
-    }
-
-    .btn-primary:hover {
-      transform: translateY(-1px);
-      box-shadow: 0 15px 35px -10px rgba(124, 58, 237, 0.6);
-    }
-
-    .btn-secondary {
-      background: var(--panel);
-      border-color: var(--border);
-      color: var(--text);
-      backdrop-filter: blur(12px);
-    }
-
-    .btn-secondary:hover {
-      border-color: rgba(255, 255, 255, 0.15);
-      transform: translateY(-1px);
-    }
-
-    .features {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      gap: 16px;
-      margin-bottom: 60px;
-      text-align: left;
-    }
-
-    .feature {
-      padding: 24px;
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      backdrop-filter: blur(12px);
-    }
-
-    .feature-icon {
-      width: 40px;
-      height: 40px;
-      border-radius: 10px;
-      background: rgba(124, 58, 237, 0.15);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      margin-bottom: 14px;
-      font-size: 18px;
-    }
-
-    .feature h3 {
-      font-size: 15px;
-      font-weight: 600;
-      margin-bottom: 6px;
-    }
-
-    .feature p {
-      font-size: 13px;
-      color: var(--muted);
-      line-height: 1.55;
-    }
-
-    .endpoints {
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      padding: 24px;
-      text-align: left;
-      backdrop-filter: blur(12px);
-    }
-
-    .endpoints h3 {
-      font-size: 13px;
-      font-weight: 600;
-      color: var(--muted);
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      margin-bottom: 14px;
-    }
-
-    .endpoint {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 8px 0;
-      font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
-      font-size: 13px;
-      color: #c4b5fd;
-      word-break: break-all;
-    }
-
-    .endpoint-method {
-      display: inline-block;
-      padding: 2px 8px;
-      border-radius: 4px;
-      background: rgba(124, 58, 237, 0.2);
-      color: #c4b5fd;
-      font-size: 11px;
-      font-weight: 600;
-      flex-shrink: 0;
-    }
-
-    footer {
-      margin-top: 60px;
-      padding-top: 24px;
-      border-top: 1px solid var(--border);
-      color: var(--muted);
-      font-size: 12px;
-    }
-
-    .url-box {
-      margin-top: 12px;
-      padding: 12px 16px;
-      background: rgba(10, 10, 15, 0.6);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      font-family: 'JetBrains Mono', ui-monospace, monospace;
-      font-size: 13px;
-      color: #f472b6;
-      word-break: break-all;
-      cursor: pointer;
-      transition: border-color 0.15s ease;
-    }
-
-    .url-box:hover { border-color: rgba(244, 114, 182, 0.3); }
-    .url-box.copied { border-color: #22c55e; color: #22c55e; }
-  </style>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>HerumHai — Stremio Addon Configurator</title>
+<link rel="icon" href="/logo.png" />
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  body { font-family: 'Outfit', system-ui, sans-serif; }
+  .font-mono { font-family: 'JetBrains Mono', monospace; }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: #0d0e15; }
+  ::-webkit-scrollbar-thumb { background: #252840; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #3c3f62; }
+  textarea { white-space: pre-wrap; word-break: break-all; overflow-wrap: break-word; }
+</style>
 </head>
-<body>
-  <div class="container">
-    <div class="badge">HerumHai · Vercel Serverless · Real-Time Scraping</div>
+<body class="min-h-screen bg-[#07080e] text-slate-100 py-8 px-4 sm:px-6 lg:px-8">
+<div class="max-w-6xl mx-auto space-y-8">
 
-    <div class="logo">
-      <img src="/logo.png" alt="HerumHai" />
-    </div>
-
-    <h1>
-      <span class="gradient-text">HerumHai</span>
-    </h1>
-
-    <p class="tagline">
-      A real-time, serverless Stremio / Nuvio addon that resolves direct
-      HLS &amp; MP4 streams with anti-decoy filtering and proxy headers.
-    </p>
-
-    <div class="cta-group">
-      <a id="install-stremio" class="btn btn-primary" href="#">
-        ⚡ Install in Stremio
-      </a>
-      <a id="view-manifest" class="btn btn-secondary" href="/manifest.json" target="_blank" rel="noopener">
-        View Manifest
-      </a>
-    </div>
-
-    <div class="url-box" id="manifest-url" title="Click to copy">
-      loading…
-    </div>
-
-    <div class="features">
-      <div class="feature">
-        <div class="feature-icon">🛡️</div>
-        <h3>Anti-Decoy Filter</h3>
-        <p>Automatically discards tutorial, sample, trailer, and any MP4 under 50MB. Real streams only.</p>
+  <!-- Header -->
+  <header class="flex flex-col md:flex-row items-center justify-between border-b border-[#1b1d30] pb-6 gap-4">
+    <div class="flex items-center gap-3">
+      <div class="bg-white p-1.5 rounded-2xl w-12 h-12 shadow-lg shadow-indigo-500/10 flex items-center justify-center shrink-0 border border-slate-200/10">
+        <img src="/logo.png" alt="HerumHai" class="w-full h-full object-contain rounded-xl" referrerPolicy="no-referrer" />
       </div>
-      <div class="feature">
-        <div class="feature-icon">⚡</div>
-        <h3>Real-Time Resolution</h3>
-        <p>Spawns headless Chromium on each request, navigates embeds, and captures HLS / DASH / MP4 streams.</p>
-      </div>
-      <div class="feature">
-        <div class="feature-icon">🔑</div>
-        <h3>Proxy Headers</h3>
-        <p>Captures User-Agent, Referer, and Cookie from the live session and injects them via behaviorHints.</p>
-      </div>
-      <div class="feature">
-        <div class="feature-icon">☁️</div>
-        <h3>Vercel Serverless</h3>
-        <p>Built on @sparticuz/chromium + puppeteer-core for AWS Lambda compatibility. No cold-start infrastructure.</p>
+      <div>
+        <div class="flex items-center gap-2">
+          <h1 class="text-2xl font-extrabold tracking-tight bg-gradient-to-r from-slate-100 via-indigo-200 to-indigo-400 bg-clip-text text-transparent">HerumHai</h1>
+          <div class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[#131525] border border-slate-800/60 text-[9px] font-bold uppercase tracking-wider select-none">
+            <span class="relative flex h-2 w-2">
+              <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500 shadow-[0_0_8px_#10b981]"></span>
+            </span>
+            <span class="text-emerald-400 font-mono">live</span>
+          </div>
+        </div>
+        <p class="text-xs text-slate-400 font-medium font-mono uppercase tracking-wider mt-0.5">Stremio Addon Configurator</p>
       </div>
     </div>
-
-    <div class="endpoints">
-      <h3>API Endpoints</h3>
-      <div class="endpoint">
-        <span class="endpoint-method">GET</span>
-        <span>/manifest.json</span>
-      </div>
-      <div class="endpoint">
-        <span class="endpoint-method">GET</span>
-        <span>/api/stream?type=movie&amp;id=tt1375666</span>
-      </div>
-      <div class="endpoint">
-        <span class="endpoint-method">GET</span>
-        <span>/api/stream?type=series&amp;id=tt0944947:1:1</span>
-      </div>
-      <div class="endpoint">
-        <span class="endpoint-method">GET</span>
-        <span>/api/stream?type=anime&amp;id=kitsu:41436:1</span>
-      </div>
+    <div class="flex items-center gap-3">
+      <button onclick="resetDefaults()" class="text-xs font-semibold text-slate-400 hover:text-white bg-[#111222]/80 hover:bg-[#181932] border border-[#1b1d30] px-4 py-2 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+        Reset Defaults
+      </button>
+      <span class="text-[10px] font-bold font-mono text-emerald-400 bg-emerald-950/40 border border-emerald-500/15 px-3 py-1.5 rounded-full uppercase tracking-wider flex items-center gap-1.5">
+        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400" /> v1.1.0 Stable
+      </span>
     </div>
+  </header>
 
-    <footer>
-      HerumHai v1.0.0 · Vercel Serverless Addon · MIT License
-    </footer>
+  <!-- 1st: Quality Selection -->
+  <div class="bg-[#111222] border border-[#1b1d30] rounded-2xl p-6 shadow-xl">
+    <div class="flex justify-between items-center mb-6">
+      <div class="flex items-center gap-3">
+        <div class="bg-indigo-950/40 p-2.5 rounded-xl border border-indigo-500/20 text-indigo-400">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path></svg>
+        </div>
+        <div>
+          <div class="flex items-center gap-2">
+            <h2 class="text-lg font-semibold text-slate-100 tracking-wide">Resolutions</h2>
+            <span id="res-badge" class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider bg-emerald-950/50 text-emerald-400 border border-emerald-500/30">Configured</span>
+          </div>
+          <p class="text-xs text-slate-400">Select which resolutions to fetch stream links for</p>
+        </div>
+      </div>
+      <span class="text-xs font-mono font-medium text-slate-300 bg-[#1e2035] px-2.5 py-1 rounded-full border border-[#2b2e4c]" id="res-count">6/6 selected</span>
+    </div>
+    <div class="grid grid-cols-2 sm:grid-cols-3 gap-3" id="res-grid"></div>
   </div>
 
-  <script>
-    // Build the manifest URL dynamically (works on any deployment)
-    const manifestUrl = window.location.origin + '/manifest.json';
-    const urlBox = document.getElementById('manifest-url');
-    urlBox.textContent = manifestUrl;
+  <!-- 2nd: Full Formatter Section -->
+  <div class="bg-[#111222] border border-[#1b1d30] rounded-2xl p-4 sm:p-6 shadow-xl space-y-6" id="formatter-container">
+    <input type="file" id="file-input" accept=".json" class="hidden" />
 
-    // Stremio install link (stremio:// protocol handler)
-    const installBtn = document.getElementById('install-stremio');
-    installBtn.href = 'stremio://' + manifestUrl.replace(/^https?:\/\//, '');
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div class="flex items-center gap-3">
+        <div class="bg-indigo-950/40 p-2.5 rounded-xl border border-indigo-500/20 text-indigo-400">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3"></path></svg>
+        </div>
+        <div>
+          <h2 class="text-lg font-semibold text-slate-100 tracking-wide">Custom Formatter</h2>
+          <p class="text-xs text-slate-400">Structure how streams appear in Stremio</p>
+        </div>
+      </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <select id="preset-select" class="bg-[#16182c] border border-[#2b2d4c] text-xs text-slate-200 rounded-xl px-4 py-2.5 focus:outline-none focus:border-indigo-500 cursor-pointer">
+          <option value="custom">Custom Template</option>
+          <option value="default">Default Preset</option>
+          <option value="minimalist">Minimalist Preset</option>
+          <option value="compact">Compact Preset</option>
+        </select>
+        <div class="flex items-center gap-1 bg-[#0b0c16]/50 border border-[#1f2136] rounded-xl p-1">
+          <input type="text" id="preset-name-input" placeholder="Preset name..." class="bg-transparent border-none text-[11px] text-slate-200 px-2 py-1.5 focus:outline-none w-24 placeholder:text-slate-600" />
+          <button onclick="savePreset()" class="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-[10px] font-bold cursor-pointer flex items-center gap-1 shrink-0">Save</button>
+        </div>
+      </div>
+    </div>
 
-    // Click to copy
-    urlBox.addEventListener('click', async () => {
-      try {
-        await navigator.clipboard.writeText(manifestUrl);
-        urlBox.classList.add('copied');
-        urlBox.textContent = '✓ Copied — paste into Stremio → Addons → Add Addon';
-        setTimeout(() => {
-          urlBox.classList.remove('copied');
-          urlBox.textContent = manifestUrl;
-        }, 2500);
-      } catch {
-        // Fallback
-        const range = document.createRange();
-        range.selectNode(urlBox);
-        window.getSelection().removeAllRanges();
-        window.getSelection().addRange(range);
-        document.execCommand('copy');
-        window.getSelection().removeAllRanges();
-      }
-    });
-  </script>
+    <p class="text-xs text-slate-400 flex items-center gap-1.5 flex-wrap">
+      <span>Type <code class="text-indigo-400 bg-indigo-950/20 px-1.5 py-0.5 rounded font-mono font-semibold">{debug.jsonf}</code> to inspect all template variables.</span>
+    </p>
+
+    <!-- Name Template -->
+    <div class="space-y-2">
+      <label class="text-xs font-semibold text-slate-300 uppercase tracking-wider font-mono">Name Template</label>
+      <textarea id="name-template" spellcheck="false" style="min-height:120px;" class="w-full bg-[#0b0c16] border border-[#1f2136] rounded-xl p-4 text-xs font-mono text-slate-200 focus:outline-none focus:border-indigo-500 resize-y" placeholder="Enter name template..."></textarea>
+    </div>
+
+    <!-- Description Template -->
+    <div class="space-y-2">
+      <label class="text-xs font-semibold text-slate-300 uppercase tracking-wider font-mono">Description Template</label>
+      <textarea id="desc-template" spellcheck="false" style="min-height:200px;" class="w-full bg-[#0b0c16] border border-[#1f2136] rounded-xl p-4 text-xs font-mono text-slate-200 focus:outline-none focus:border-indigo-500 resize-y" placeholder="Enter description template..."></textarea>
+    </div>
+
+    <!-- Formatter Controls -->
+    <div class="flex items-center justify-between pt-1">
+      <button onclick="toggleSnippets()" class="px-4 py-2 bg-[#1b1d33] hover:bg-[#252848] border border-[#2b2d4c] text-xs font-medium text-slate-300 rounded-xl cursor-pointer flex items-center gap-2">
+        <svg class="w-3.5 h-3.5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"></path></svg>
+        Snippets
+      </button>
+      <div class="flex items-center gap-2">
+        <span id="notification" class="hidden text-xs text-indigo-400 bg-indigo-950/40 px-3 py-1.5 rounded-lg border border-indigo-500/10"></span>
+        <button onclick="exportConfig()" class="p-2.5 bg-[#151728] hover:bg-[#1f213c] border border-[#262846] text-slate-300 rounded-xl cursor-pointer" title="Export to JSON">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+        </button>
+        <button onclick="document.getElementById('file-input').click()" class="p-2.5 bg-[#151728] hover:bg-[#1f213c] border border-[#262846] text-slate-300 rounded-xl cursor-pointer" title="Import JSON">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Snippets Panel -->
+    <div id="snippets-panel" class="hidden bg-[#0b0c16]/50 border border-[#1f2136] rounded-xl p-4 space-y-4">
+      <h4 class="text-xs font-bold text-indigo-400 font-mono uppercase">Quick Snippets</h4>
+      <div class="grid grid-cols-2 gap-2">
+        <div>
+          <p class="text-[10px] font-semibold text-slate-500 mb-1">Name:</p>
+          <div class="flex flex-wrap gap-1" id="name-snippets"></div>
+        </div>
+        <div>
+          <p class="text-[10px] font-semibold text-slate-500 mb-1">Description:</p>
+          <div class="flex flex-wrap gap-1" id="desc-snippets"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Preview -->
+    <div class="border border-[#1f2136] bg-[#0b0c16] rounded-2xl overflow-hidden">
+      <div class="border-b border-[#1f2136] px-4 py-3 bg-[#121323] flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="w-2.5 h-2.5 rounded-full bg-indigo-500 animate-pulse"></span>
+          <span class="text-xs font-bold text-slate-200 font-mono uppercase tracking-widest">Preview</span>
+        </div>
+        <div class="flex items-center gap-1 bg-[#0b0c16] p-1 rounded-xl border border-[#1f2136]">
+          <button onclick="setTab('stremio')" id="tab-stremio" class="px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase bg-indigo-600 text-white cursor-pointer">📺 Stremio UI</button>
+          <button onclick="setTab('raw')" id="tab-raw" class="px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase text-slate-400 hover:text-slate-200 cursor-pointer">📝 Raw</button>
+          <button onclick="setTab('json')" id="tab-json" class="px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase text-slate-400 hover:text-slate-200 cursor-pointer">🗄️ JSON</button>
+        </div>
+      </div>
+      <div class="p-4 space-y-3">
+        <div class="flex flex-wrap gap-1.5 mb-3" id="scenario-btns">
+          <button onclick="loadScenario('4k')" data-sc="4k" class="px-3 py-1.5 rounded-lg text-[10px] font-medium bg-indigo-950/40 text-indigo-400 border border-indigo-500/40 cursor-pointer">🎬 4K BluRay</button>
+          <button onclick="loadScenario('1080')" data-sc="1080" class="px-3 py-1.5 rounded-lg text-[10px] font-medium bg-[#16182c] text-slate-400 border-transparent hover:text-slate-200 cursor-pointer">📺 1080p WEB-DL</button>
+          <button onclick="loadScenario('anime')" data-sc="anime" class="px-3 py-1.5 rounded-lg text-[10px] font-medium bg-[#16182c] text-slate-400 border-transparent hover:text-slate-200 cursor-pointer">🌸 Anime</button>
+        </div>
+        <div id="preview-content" class="bg-black/50 rounded-xl p-4 space-y-2 min-h-[80px]"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3rd: Install + Copy -->
+  <div class="bg-[#111222] border border-[#1b1d30] rounded-2xl p-6 shadow-xl space-y-6">
+    <div class="flex items-center gap-3">
+      <div class="bg-indigo-950/40 p-2.5 rounded-xl border border-indigo-500/20 text-indigo-400">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+      </div>
+      <div>
+        <h2 class="text-lg font-semibold text-slate-100 tracking-wide">Install</h2>
+        <p class="text-xs text-slate-400">Deploy to Stremio</p>
+      </div>
+    </div>
+    <div class="flex flex-wrap gap-3">
+      <button id="install-btn" class="flex items-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-500 text-white font-semibold text-sm hover:shadow-lg cursor-pointer">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+        Install in Stremio
+      </button>
+      <button id="copy-btn" class="flex items-center gap-2 px-6 py-3 rounded-xl bg-[#1e2035] border border-[#2b2e4c] text-slate-300 font-semibold text-sm hover:bg-[#252848] cursor-pointer">
+        Copy Addon URL
+      </button>
+    </div>
+    <div class="bg-[#0b0c16]/50 border border-[#1f2136] rounded-xl p-4">
+      <div class="text-xs font-mono text-slate-500 break-all" id="url-display">Loading...</div>
+    </div>
+  </div>
+
+  <footer class="border-t border-[#1b1d30] pt-6 text-center text-xs text-slate-500">
+    Powered by <span class="text-indigo-400 font-semibold">HerumHai Addons</span>
+  </footer>
+</div>
+
+<script>
+// === TEMPLATE ENGINE (from Configure-WebUI) ===
+
+
+// === STATE ===
+const PRESETS = {
+  custom: { name: "     {stream.library::istrue[\"\ud83d\udcda \"||\"\"]}{service.cached::istrue[\"\u26a1 \"||\"\"]}{service.cached::isfalse[\"\u23f3 \"||\"\"]}{stream.resolution::exists[\"{stream.resolution::replace('2160p','4K')::replace('1440p','2K')::replace('1080p','FHD')::replace('720p','HD')}\"||\"?\"]}{stream.quality::exists[\"\u00b0{stream.quality::replace('BluRay REMUX','REMUX')::replace('HC HD-Rip','HC HDRIP')::replace('BluRay','BLURAY')::replace('WEB-DL','WEBDL')::replace('WEBRip','WEBRIP')::replace('DVDRip','DVDRIP')::replace('HDRip','HDRIP')::upper::smallcaps}\"||\"\u3000\"]}{stream.type::exists[\"\u200d{stream.type::replace('debrid','  ')::replace('p2p','\u207d\u1d56\u00b2\u1d56\u207e')::replace('live','\u207d\u02e1\u1da6\u1d5b\u1d49\u207e')::replace('http','\u207d\u02b7\u1d49\u1d47\u207e')::replace('usenet','\u200d\u207d\u207f\u1dbb\u1d47\u207e\u200d')::replace('stremio-usenet','\u200f\u207d\u207f\u1dbb\u1d47\u207e')::replace('info','\u207d\u1da6\u207f\u1da0\u1d52\u207e')::replace('statistic','\u207d\u02e2\u1d57\u1d43\u1d57\u02e2\u207e')::replace('external','\u207d\u1d49\u02e3\u1d57\u207e')::replace('error','\u207d\u1d49\u02b3\u02b3\u1d52\u02b3\u207e')::replace('youtube','\u207d\u02b8\u1d57\u207e')}\u200d\u200d\u200d\"||\"\"]}{stream.nSeScore::exists[\"\u2301  {stream.nSeScore}% {stream.nSeScore::star::replace('\u2605','\u2b50')::replace('\u2bea','\u2728')::replace('\u2606','')}\"||\"\"]}{stream.seadexBest::istrue[\"\u207d\u1d47\u1d49\u02e2\u1d57\u207e\"||\"\"]}{stream.seadex::istrue::and::stream.seadexBest::isfalse[\"\u207d\u1d43\u02e1\u1d57\u207e\"||\"\"]}{service.cached::isfalse::or::stream.type::=p2p::and::stream.seeders::>0[\"\u3000\ud83c\udf31 {stream.seeders}\"||\"\"]}{stream.audioTags::exists[\"{stream.audioTags::join('|')::replace('DTS-HD MA','\u2063\u200c\u200c\u200c\u200c\u200d\u200d\u200c\u200d\u2064')::replace('DTS-HD','\u2063\u200c\u200c\u200c\u200c\u200d\u200d\u200d\u200c\u2064')::replace('DTS-ES','\u2063\u200c\u200c\u200c\u200c\u200d\u200d\u200d\u200d\u2064')::replace('TrueHD','\u2063\u200c\u200c\u200c\u200d\u200c\u200c\u200c\u200d\u2064')::replace('Atmos','\u2063\u200c\u200c\u200c\u200c\u200d\u200c\u200c\u200d\u2064')::replace('DTS:X','\u2063\u200c\u200c\u200c\u200c\u200d\u200d\u200c\u200c\u2064')::replace('OPUS','\u2063\u200c\u200c\u200c\u200d\u200c\u200c\u200d\u200c\u2064')::replace('FLAC','\u2063\u200c\u200c\u200c\u200d\u200c\u200d\u200c\u200c\u2064')::replace('DD+','\u2063\u200c\u200c\u200c\u200c\u200d\u200c\u200d\u200c\u2064')::replace('DTS','\u2063\u200c\u200c\u200c\u200d\u200c\u200c\u200c\u200c\u2064')::replace('AAC','\u2063\u200c\u200c\u200c\u200d\u200c\u200c\u200d\u200d\u2064')::replace('DD','\u2063\u200c\u200c\u200c\u200c\u200d\u200c\u200d\u200d\u2064')::replace('Unknown','')::replace('|','')}\"||\"\"]}{stream.quality::exists[\"{stream.quality::replace('BluRay REMUX','\u2063\u200c\u200c\u200d\u200c\u200c\u200c\u200d\u200c\u2064')::replace('HC HD-Rip','\u2063\u200c\u200c\u200d\u200c\u200c\u200d\u200d\u200d\u2064')::replace('BluRay','\u2063\u200c\u200c\u200d\u200c\u200c\u200c\u200d\u200d\u2064')::replace('WEB-DL','\u2063\u200c\u200c\u200d\u200c\u200c\u200d\u200c\u200c\u2064')::replace('WEBRip','\u2063\u200c\u200c\u200d\u200c\u200c\u200d\u200c\u200d\u2064')::replace('DVDRip','\u2063\u200c\u200c\u200d\u200c\u200d\u200c\u200c\u200c\u2064')::replace('HDRip','')::replace('HDTV','\u2063\u200c\u200c\u200d\u200c\u200d\u200c\u200c\u200d\u2064')::replace('SCR','\u2063\u200c\u200c\u200d\u200c\u200d\u200c\u200d\u200c\u2064')::replace('CAM','\u2063\u200c\u200c\u200d\u200c\u200d\u200d\u200c\u200d\u2064')::replace('TC','\u2063\u200c\u200c\u200d\u200c\u200d\u200c\u200d\u200d\u2064')::replace('TS','\u2063\u200c\u200c\u200d\u200c\u200d\u200d\u200c\u200c\u2064')::replace('Unknown','')}\"||\"\"]}{stream.visualTags::exists[\"{stream.visualTags::join('|')::replace('HDR10+','\u2063\u200c\u200c\u200c\u200c\u200c\u200c\u200d\u200c\u2064')::replace('HDR10','\u2063\u200c\u200c\u200c\u200c\u200c\u200c\u200d\u200d\u2064')::replace('10bit','\u2063\u200c\u200c\u200c\u200c\u200c\u200d\u200d\u200c\u2064')::replace('HDR','\u2063\u200c\u200c\u200c\u200c\u200c\u200d\u200c\u200c\u2064')::replace('HLG','\u2063\u200c\u200c\u200c\u200c\u200c\u200d\u200c\u200d\u2064')::replace('SDR','\u2063\u200c\u200c\u200c\u200c\u200c\u200d\u200d\u200d\u2064')::replace('DV','\u2063\u200c\u200c\u200c\u200c\u200c\u200c\u200c\u200d\u2064')::replace('AI','\u2063\u200c\u200c\u200c\u200c\u200d\u200c\u200c\u200c\u2064')::replace('Unknown','')::replace('H-SBS','')::replace('IMAX','')::replace('H-OU','')::replace('3D','')::replace('|','')}\"||\"\"]}{stream.resolution::exists[\"{stream.resolution::replace('2160p','\u2063\u200c\u200c\u200c\u200d\u200d\u200c\u200c\u200d\u2064')::replace('1440p','\u2063\u200c\u200c\u200c\u200d\u200d\u200c\u200d\u200c\u2064')::replace('1080p','\u2063\u200c\u200c\u200c\u200d\u200d\u200c\u200d\u200d\u2064')::replace('720p','\u2063\u200c\u200c\u200c\u200d\u200d\u200d\u200c\u200c\u2064')::replace('576p','\u2063\u200c\u200c\u200c\u200d\u200d\u200d\u200c\u200d\u2064')::replace('480p','\u2063\u200c\u200c\u200c\u200d\u200d\u200d\u200d\u200c\u2064')::replace('360p','\u2063\u200c\u200c\u200c\u200d\u200d\u200d\u200d\u200d\u2064')::replace('240p','\u2063\u200c\u200c\u200d\u200c\u200c\u200c\u200c\u200c\u2064')::replace('144p','\u2063\u200c\u200c\u200d\u200c\u200c\u200c\u200c\u200d\u2064')::replace('Unknown','')}\"||\"\"]}{stream.quality::=HDRip::and::stream.filename::exists::and::stream.filename::lower::~hc::isfalse::and::stream.filename::lower::~hardcoded::isfalse::and::stream.filename::lower::~hardsub::isfalse::and::stream.filename::lower::~korsub::isfalse[\"\u2063\u200c\u200c\u200d\u200c\u200c\u200d\u200d\u200c\u2064\"||\"\"]}{stream.encode::exists[\"{stream.encode::replace('HEVC','\u2063\u200c\u200c\u200d\u200c\u200d\u200d\u200d\u200d\u2064')::replace('XviD','\u2063\u200c\u200c\u200d\u200d\u200c\u200c\u200c\u200d\u2064')::replace('DivX','\u2063\u200c\u200c\u200d\u200d\u200c\u200c\u200d\u200c\u2064')::replace('AV1','\u2063\u200c\u200c\u200d\u200c\u200d\u200d\u200d\u200c\u2064')::replace('AVC','\u2063\u200c\u200c\u200d\u200d\u200c\u200c\u200c\u200c\u2064')::replace('Unknown','')::replace('VC-1','')}\"||\"\"]}{stream.audioChannels::exists[\"{stream.audioChannels::join('|')::replace('7.1','\u2063\u200c\u200c\u200c\u200d\u200c\u200d\u200c\u200d\u2064')::replace('6.1','\u2063\u200c\u200c\u200c\u200d\u200c\u200d\u200d\u200c\u2064')::replace('5.1','\u2063\u200c\u200c\u200c\u200d\u200c\u200d\u200d\u200d\u2064')::replace('2.0','\u2063\u200c\u200c\u200c\u200d\u200d\u200c\u200c\u200c\u2064')::replace('Unknown','')::replace('|','')}\"||\"\"]}{stream.quality::=HDRip::and::stream.filename::exists::and::stream.filename::lower::replace('korsub','\u00a7')::replace('hardcoded','\u00a7')::replace('hardsub','\u00a7')::replace('hc','\u00a7')::~\u00a7[\"\u2063\u200c\u200c\u200d\u200c\u200c\u200d\u200d\u200d\u2064\"||\"\"]}{stream.filename::exists::and::stream.filename::lower::replace('.', ' ')::replace('-', ' ')::replace('_', ' ')::~imax enhanced[\"\u2063\u200c\u200d\u200c\u200d\u200d\u200c\u200c\u200c\u2064\"||\"\"]}{stream.rankedRegexMatched::exists::and::stream.rankedRegexMatched::string::lower::~imax enhanced[\"\u2063\u200c\u200d\u200c\u200d\u200d\u200c\u200c\u200c\u2064\"||\"\"]}{stream.rseMatched::exists::and::stream.rseMatched::string::lower::~imax enhanced[\"\u2063\u200c\u200d\u200c\u200d\u200d\u200c\u200c\u200c\u2064\"||\"\"]}{stream.regexMatched::exists::and::stream.regexMatched::lower::~imax enhanced[\"\u2063\u200c\u200d\u200c\u200d\u200d\u200c\u200c\u200c\u2064\"||\"\"]}{stream.network::~HBO::or::stream.network::=Max[\"\u2063\u200c\u200c\u200d\u200d\u200d\u200d\u200c\u200d\u2064\"||\"\"]}{stream.editions::~Director's Cut[\"\u2063\u200c\u200d\u200c\u200c\u200c\u200c\u200d\u200c\u2064\"||\"\"]}{stream.rseMatched::string::~T2[\"\u2063\u200c\u200d\u200c\u200d\u200c\u200c\u200c\u200d\u2064\"||\"\"]}{stream.rseMatched::string::~T4[\"\u2063\u200c\u200d\u200c\u200d\u200c\u200c\u200d\u200d\u2064\"||\"\"]}{stream.rseMatched::string::~T6[\"\u2063\u200c\u200d\u200c\u200d\u200c\u200d\u200c\u200d\u2064\"||\"\"]}{stream.rseMatched::string::~T8[\"\u2063\u200c\u200d\u200c\u200d\u200c\u200d\u200d\u200d\u2064\"||\"\"]}{stream.network::=Crunchyroll[\"\u2063\u200c\u200d\u200c\u200c\u200c\u200c\u200c\u200c\u2064\"||\"\"]}{stream.network::~Paramount[\"\u2063\u200c\u200c\u200d\u200d\u200d\u200d\u200d\u200d\u2064\"||\"\"]}{stream.uncensored::istrue[\"\u2063\u200c\u200c\u200d\u200d\u200c\u200d\u200d\u200c\u2064\"||\"\"]}{stream.network::~Peacock[\"\u2063\u200c\u200c\u200d\u200d\u200d\u200c\u200c\u200c\u2064\"||\"\"]}{stream.network::~Disney[\"\u2063\u200c\u200c\u200d\u200d\u200d\u200d\u200c\u200c\u2064\"||\"\"]}{stream.editions::~Uncut[\"\u2063\u200c\u200d\u200c\u200c\u200c\u200d\u200c\u200d\u2064\"||\"\"]}{stream.repack::istrue[\"\u2063\u200c\u200c\u200d\u200d\u200c\u200d\u200c\u200c\u2064\"||\"\"]}{stream.seadex::istrue[\"\u2063\u200c\u200c\u200d\u200d\u200c\u200d\u200d\u200d\u2064\"||\"\"]}", desc: "\u256d\u2500\u2500\u2500\u2500 \ud81a\udd10 {stream.title::exists[\"{stream.title::truncate(40)::smallcaps}\"||\"\ua731\u1d1b\u0280\u1d07\u1d00\u1d0d \u1d0f\u0280\u0299\u026a\u1d1b\"]}{stream.year::exists[\" \u207d{stream.year::replace('0','\u2070')::replace('1','\u00b9')::replace('2','\u00b2')::replace('3','\u00b3')::replace('4','\u2074')::replace('5','\u2075')::replace('6','\u2076')::replace('7','\u2077')::replace('8','\u2078')::replace('9','\u2079')}\u207e\"||\"\"]}{stream.seasonEpisode::exists[\"  {stream.seasonEpisode::join('\u00b7')::replace('S','\u02e2')::replace('E','\u1d49')::replace('0','\u2070')::replace('1','\u00b9')::replace('2','\u00b2')::replace('3','\u00b3')::replace('4','\u2074')::replace('5','\u2075')::replace('6','\u2076')::replace('7','\u2077')::replace('8','\u2078')::replace('9','\u2079')}\"||\"\"]} \ud81a\udd10 \u2500\u2500\u2500\u2500\u256e{stream.visualTags::exists::or::stream.duration::>0::or::metadata.episodeRuntime::>0::or::metadata.runtime::>0::or::stream.age::exists[\"\n\u2502  \"||\"\"]}{stream.visualTags::exists[\"\ud83c\udfa8  {stream.visualTags::sort::join(' \u22c5 ')}  \"||\"\"]}{stream.duration::>0[\"\u23f1\ufe0f  {stream.duration::time} \"||\"\"]}{stream.duration::exists::isfalse::and::metadata.episodeRuntime::>0[\"\u23f1\ufe0f  {metadata.episodeRuntime}m \"||\"\"]}{stream.duration::exists::isfalse::and::metadata.episodeRuntime::exists::isfalse::and::metadata.runtime::>0[\"\u23f1\ufe0f  {metadata.runtime}m \"||\"\"]}{stream.age::exists[\"\u22c5 {stream.age}  \"||\"\"]}{stream.audioTags::exists::or::stream.audioChannels::exists[\"\n\u2502  \"||\"\"]}{stream.audioTags::exists[\"\ud83c\udfa7  {stream.audioTags::lsort::join(' \u22c5 ')}  \"||\"\"]}{stream.audioChannels::exists[\"\ud83d\udd0a  {stream.audioChannels::join(' \u22c5 ')}\"||\"\"]}{stream.uLanguageEmojis::exists::or::stream.uSubtitleEmojis::exists::or::stream.dubbed::istrue[\"\n\u2502  \"||\"\"]}{stream.uLanguageEmojis::exists[\"\ud83d\udde3\ufe0f  {stream.uSmallLanguageCodes::join(' \u00b7 ')}  | \"||\"\"]}{stream.uSubtitleEmojis::exists[\"\ud83d\udcac  {stream.uSmallSubtitleCodes::join(' \u00b7 ')}\"||\"\"]}{stream.dubbed::istrue[\" \u22c5 \u1d05\u1d1c\u0299\"||\"\"]}\n{stream.size::>0::or::stream.folderSize::>0::or::stream.bitrate::>0::or::stream.encode::exists[\"\n\u2502  \"||\"\"]}{stream.size::>0[\"\ud83d\udcbe  {stream.size::sbytes::smallcaps} \"||\"\"]}{stream.folderSize::>0[\"[{stream.folderSize::sbytes::smallcaps}] \"||\"\"]}{stream.bitrate::exists[\"\u00b7 {stream.bitrate::sbitrate::replace('Mbps','\u1d39\u1d47\u1d56\u02e2')::replace('Kbps','\u1d37\u1d47\u1d56\u02e2')}  \"||\"\"]}{stream.encode::exists[\"\u2699\ufe0f {stream.encode}\"||\"\"]}{stream.edition::exists::and::stream.edition::~Criterion::isfalse::and::stream.edition::~Director::isfalse::and::stream.edition::~Extended::isfalse::and::stream.edition::~Theatrical::isfalse::and::stream.edition::=Uncut::isfalse::and::stream.edition::=IMAX::isfalse::and::stream.edition::~Remaster::isfalse::or::stream.unrated::istrue::or::stream.upscaled::istrue::or::stream.private::istrue::or::stream.freeleech::istrue[\"\n\u2502  \ud83c\udfac  \"||\"\"]}{stream.edition::exists::and::stream.edition::~Criterion::isfalse::and::stream.edition::~Director::isfalse::and::stream.edition::~Extended::isfalse::and::stream.edition::~Theatrical::isfalse::and::stream.edition::=Uncut::isfalse::and::stream.edition::=IMAX::isfalse::and::stream.edition::~Remaster::isfalse[\"{stream.edition::smallcaps}  \"||\"\"]}{stream.unrated::istrue[\"\u1d1c\u0274\u0280\u1d00\u1d1b\u1d07\u1d05  \"||\"\"]}{stream.upscaled::istrue[\"\u1d1c\u1d18\ua731\u1d04\u1d00\u029f\u1d07\u1d05  \"||\"\"]}{stream.private::istrue[\"\u1d18\u0280\u026a\u1d20\u1d00\u1d1b\u1d07  \"||\"\"]}{stream.freeleech::istrue[\"\ua730\u0280\u1d07\u1d07\u029f\u1d07\u1d07\u1d04\u029c  \"||\"\"]}\n\u2570  \ud83e\udde9  {addon.name::smallcaps}{service.shortName::exists[\" [{service.shortName::smallcaps}]\"||\"\"]}{stream.network::exists::and::stream.network::~Peacock::isfalse::and::stream.network::~Netflix::isfalse::and::stream.network::~Amazon::isfalse::and::stream.network::~Prime::isfalse::and::stream.network::~Apple::isfalse::and::stream.network::~Disney::isfalse::and::stream.network::~HBO::isfalse::and::stream.network::=Max::isfalse::and::stream.network::~Hulu::isfalse::and::stream.network::~Paramount::isfalse::and::stream.network::~Crunchyroll::isfalse[\"  \u22c5  {stream.network::smallcaps}\"||\"\"]}{stream.releaseGroup::exists[\"  \u22c5  {stream.releaseGroup::truncate(16)::smallcaps}\"||\"\"]}{stream.indexer::exists::and::stream.indexer::~multi::isfalse::and::stream.indexer::~dual::isfalse[\"  \u22c5  {stream.indexer::truncate(16)::smallcaps}\"||\"\"]}{stream.quality::=HDRip::and::stream.filename::exists::isfalse[\"\u2063\u200c\u200c\u200d\u200c\u200c\u200d\u200d\u200c\u2064\"||\"\"]}{stream.network::~Amazon::or::stream.network::=Prime Video[\"\u2063\u200c\u200c\u200d\u200d\u200d\u200c\u200d\u200c\u2064\"||\"\"]}{stream.editions::string::~Extended[\"\u2063\u200c\u200d\u200c\u200c\u200c\u200c\u200d\u200d\u2064\"||\"\"]}{stream.rseMatched::string::~T1[\"\u2063\u200c\u200d\u200c\u200d\u200c\u200c\u200c\u200c\u2064\"||\"\"]}{stream.rseMatched::string::~T3[\"\u2063\u200c\u200d\u200c\u200d\u200c\u200c\u200d\u200c\u2064\"||\"\"]}{stream.rseMatched::string::~T5[\"\u2063\u200c\u200d\u200c\u200d\u200c\u200d\u200c\u200c\u2064\"||\"\"]}{stream.rseMatched::string::~T7[\"\u2063\u200c\u200d\u200c\u200d\u200c\u200d\u200d\u200c\u2064\"||\"\"]}{stream.editions::~Theatrical[\"\u2063\u200c\u200d\u200c\u200c\u200c\u200d\u200c\u200c\u2064\"||\"\"]}{stream.editions::~Remastered[\"\u2063\u200c\u200d\u200c\u200c\u200c\u200d\u200d\u200d\u2064\"||\"\"]}{stream.network::~Apple TV[\"\u2063\u200c\u200c\u200d\u200d\u200d\u200c\u200d\u200d\u2064\"||\"\"]}{stream.network::=Netflix[\"\u2063\u200c\u200c\u200d\u200d\u200d\u200c\u200c\u200d\u2064\"||\"\"]}{stream.regraded::istrue[\"\u2063\u200c\u200c\u200d\u200d\u200c\u200d\u200c\u200d\u2064\"||\"\"]}{stream.editions::~IMAX[\"\u2063\u200c\u200d\u200c\u200c\u200c\u200d\u200d\u200c\u2064\"||\"\"]}{stream.network::=Hulu[\"\u2063\u200c\u200c\u200d\u200d\u200d\u200d\u200d\u200c\u2064\"||\"\"]}\n{stream.message::exists[\"{stream.message::replace('NZB Health: \u2705','\u2705 Healthy NZB ')::replace('NZB Health: \ud83e\udddd','\ud83e\udddd ElfHosted ')::replace('AvailNZB \ud83d\udc9a','\ud83d\udc9a AvailNZB ')::replace('NZB Health: \u26a0\ufe0f','\u26a0\ufe0f Unverified NZB ')::replace('NZB Health: \ud83d\udeab','\u274c Dead NZB ')} \"||\"\"]}" },
+  default: { name: "[HerumHai] {stream.resolution} - {stream.title} ({stream.year})", desc: "Source: {stream.source} | Size: {stream.size::sbytes} | Provider: {stream.provider}" },
+  minimalist: { name: "{stream.title} [{stream.resolution}]", desc: "{stream.source} | {stream.size::sbytes}" },
+  compact: { name: "{stream.title} | {stream.resolution} | {stream.year}", desc: "{stream.size::sbytes} | {stream.provider}" },
+};
+
+const RESOLUTIONS = [
+  { id: '4K', label: '4K', sub: '2160p', key: 'res_2160', selected: true },
+  { id: '2K', label: '2K', sub: '1440p', key: 'res_1440', selected: true },
+  { id: '1080p', label: '1080p', sub: 'Full HD', key: 'res_1080', selected: true },
+  { id: '720p', label: '720p', sub: 'HD', key: 'res_720', selected: true },
+  { id: '480p', label: '480p', sub: 'SD', key: 'res_480', selected: true },
+  { id: '360p', label: '360p', sub: 'Low', key: 'res_360', selected: true },
+];
+
+const MOCK_DATA = {
+  '4k': { stream: { library: false, resolution: "2160p", quality: "BluRay", type: "debrid", nSeScore: 100, seadexBest: false, seadex: false, seeders: 0, audioTags: ["Atmos","TrueHD"], visualTags: ["DV"], filename: "Oppenheimer.2023.2160p.BluRay.HEVC.DV.TrueHD.Atmos.7.1-group.mkv", encode: "HEVC", audioChannels: ["7.1"], title: "Movie Title", year: "2023", source: "Universal", seasonEpisode: [], duration: 9120, uLanguageEmojis: true, uSubtitleEmojis: false, dubbed: false, size: 67108864000, folderSize: 134217728000, bitrate: 54800000, message: "This is a message", age: "10d", releaseGroup: "group", indexer: "rarbg", provider: "DEBRID", uSmallLanguageCodes: ["EN"], uSmallSubtitleCodes: [], rankedRegexMatched: "", rseMatched: "", regexMatched: "", network: "", editions: [], edition: "", uncensored: false, repack: false, regraded: false, unrated: false, upscaled: false, private: false, freeleech: false }, service: { cached: "none", shortName: "" }, metadata: { episodeRuntime: 152, runtime: 152 }, addon: { name: "torrentio" } },
+  '1080': { stream: { library: false, resolution: "1080p", quality: "WEB-DL", type: "debrid", nSeScore: 85, seadexBest: false, seadex: false, seeders: 120, audioTags: ["DD+","DTS"], visualTags: ["HDR","SDR"], filename: "The.Boys.S04E01.1080p.AMZN.WEB-DL.DDP5.1.H.264-FLUX.mkv", encode: "AVC", audioChannels: ["5.1"], title: "The Boys", year: "2024", source: "Universal", seasonEpisode: ["S04","E01"], duration: 3600, uLanguageEmojis: true, uSubtitleEmojis: true, dubbed: false, size: 3435973836, folderSize: 27487790688, bitrate: 7600000, message: "AvailNZB", age: "1d", releaseGroup: "FLUX", indexer: "EZTV", provider: "TORRENTIO", uSmallLanguageCodes: ["EN"], uSmallSubtitleCodes: ["EN","PT","DE"], rankedRegexMatched: "", rseMatched: "", regexMatched: "", network: "Amazon Prime", editions: [], edition: "", uncensored: false, repack: false, regraded: false, unrated: false, upscaled: false, private: false, freeleech: false }, service: { cached: true, shortName: "realdebrid" }, metadata: { episodeRuntime: 60, runtime: 60 }, addon: { name: "HerumHai" } },
+  'anime': { stream: { library: true, resolution: "1080p", quality: "BluRay", type: "p2p", nSeScore: 95, seadexBest: true, seadex: true, seeders: 32, audioTags: ["FLAC","OPUS"], visualTags: ["10bit"], filename: "[SubsPlease] Frieren - 01 (1080p) [Dual-Audio] [FLAC].mkv", encode: "HEVC", audioChannels: ["2.0"], title: "Sousou no Frieren", year: "2023", source: "AnimeSky", seasonEpisode: ["S01","E01"], duration: 1440, uLanguageEmojis: true, uSubtitleEmojis: true, dubbed: true, size: 1503238553, folderSize: 42949672960, bitrate: 8300000, message: "NZB Health: OK", age: "120d", releaseGroup: "SubsPlease", indexer: "Nyaa", provider: "TORRENTIO", uSmallLanguageCodes: ["JA","EN"], uSmallSubtitleCodes: ["EN"], rankedRegexMatched: "", rseMatched: "T1", regexMatched: "", network: "Crunchyroll", editions: ["Uncut"], edition: "Uncut", uncensored: false, repack: false, regraded: false, unrated: false, upscaled: false, private: false, freeleech: false }, service: { cached: false, shortName: "premiumize" }, metadata: { episodeRuntime: 24, runtime: 24 }, addon: { name: "HerumHai" } }
+};
+
+let currentPreset = 'custom';
+let currentScenario = '4k';
+let previewTab = 'stremio';
+let savedPresets = [];
+try { savedPresets = JSON.parse(localStorage.getItem('herumhai_saved_formatters') || '[]'); } catch(e) {}
+
+// === INIT ===
+document.getElementById('name-template').value = PRESETS.custom.name;
+document.getElementById('desc-template').value = PRESETS.custom.desc;
+
+// === Resolution Buttons ===
+const resGrid = document.getElementById('res-grid');
+RESOLUTIONS.forEach(function(r) {
+  var btn = document.createElement('button');
+  btn.className = 'flex flex-col items-start p-4 rounded-xl border text-left transition-all cursor-pointer ' + (r.selected ? 'bg-[#181a30] border-indigo-500 text-slate-100 ring-1 ring-indigo-500/30' : 'bg-[#0b0c16]/50 border-[#1f2136] text-slate-400');
+  btn.innerHTML = '<span class="text-base font-bold">' + r.id + '</span><span class="text-xs text-slate-400 mt-1 font-mono">' + r.sub + '</span>';
+  btn.onclick = function() {
+    r.selected = !r.selected;
+    btn.className = 'flex flex-col items-start p-4 rounded-xl border text-left transition-all cursor-pointer ' + (r.selected ? 'bg-[#181a30] border-indigo-500 text-slate-100 ring-1 ring-indigo-500/30' : 'bg-[#0b0c16]/50 border-[#1f2136] text-slate-400');
+    updateAll();
+  };
+  resGrid.appendChild(btn);
+});
+
+// === Preset Dropdown ===
+document.getElementById('preset-select').onchange = function() {
+  var val = this.value;
+  currentPreset = val;
+  if (PRESETS[val]) {
+    document.getElementById('name-template').value = PRESETS[val].name;
+    document.getElementById('desc-template').value = PRESETS[val].desc;
+  }
+  updateAll();
+};
+
+// === Snippets ===
+var nameSnippets = [
+  { label: 'Library', code: '{stream.library::istrue["📚 "||""]}' },
+  { label: 'Cached', code: '{service.cached::istrue["⚡ "||""]}' },
+  { label: 'Resolution', code: '{stream.resolution}' },
+  { label: 'Quality', code: '{stream.quality}' },
+  { label: 'Score', code: '{stream.nSeScore::star}' },
+];
+var descSnippets = [
+  { label: 'Title', code: '{stream.title}' },
+  { label: 'Year', code: '{stream.year}' },
+  { label: 'Size', code: '{stream.size::sbytes}' },
+  { label: 'Bitrate', code: '{stream.bitrate::sbitrate}' },
+  { label: 'Duration', code: '{stream.duration::time}' },
+  { label: 'Audio', code: '{stream.audioTags::join(" · ")}' },
+];
+var nsContainer = document.getElementById('name-snippets');
+nameSnippets.forEach(function(s) {
+  var b = document.createElement('button');
+  b.className = 'px-2 py-1 bg-[#181a32] hover:bg-[#25284b] border border-[#2c2f54] text-[10px] font-mono text-slate-300 rounded cursor-pointer';
+  b.textContent = s.label;
+  b.onclick = function() { document.getElementById('name-template').value += s.code; updateAll(); };
+  nsContainer.appendChild(b);
+});
+var dsContainer = document.getElementById('desc-snippets');
+descSnippets.forEach(function(s) {
+  var b = document.createElement('button');
+  b.className = 'px-2 py-1 bg-[#181a32] hover:bg-[#25284b] border border-[#2c2f54] text-[10px] font-mono text-slate-300 rounded cursor-pointer';
+  b.textContent = s.label;
+  b.onclick = function() { document.getElementById('desc-template').value += s.code; updateAll(); };
+  dsContainer.appendChild(b);
+});
+
+function toggleSnippets() { document.getElementById('snippets-panel').classList.toggle('hidden'); }
+
+// === Save/Export/Import ===
+function savePreset() {
+  var name = document.getElementById('preset-name-input').value.trim();
+  if (!name) { alert('Enter a preset name.'); return; }
+  savedPresets.push({ id: 'saved_' + Date.now(), name: name, nameTemplate: document.getElementById('name-template').value, descriptionTemplate: document.getElementById('desc-template').value });
+  localStorage.setItem('herumhai_saved_formatters', JSON.stringify(savedPresets));
+  document.getElementById('preset-name-input').value = '';
+  showNotification('Preset saved!');
+}
+
+function exportConfig() {
+  var data = { name: document.getElementById('name-template').value, description: document.getElementById('desc-template').value };
+  var blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'herumhai_formatter.json';
+  a.click();
+  showNotification('Exported!');
+}
+
+document.getElementById('file-input').addEventListener('change', function(e) {
+  var file = e.target.files[0];
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function(ev) {
+    try {
+      var json = JSON.parse(ev.target.result);
+      // Support both "name"/"description" AND "nameTemplate"/"descriptionTemplate" keys
+      if (json.name) document.getElementById('name-template').value = json.name;
+      else if (json.nameTemplate) document.getElementById('name-template').value = json.nameTemplate;
+      if (json.description) document.getElementById('desc-template').value = json.description;
+      else if (json.descriptionTemplate) document.getElementById('desc-template').value = json.descriptionTemplate;
+      showNotification('Imported!');
+      updateAll();
+    } catch(err) { alert('Invalid JSON file.'); }
+  };
+  reader.readAsText(file);
+  e.target.value = '';
+});
+
+// === Preview Tabs ===
+function setTab(tab) {
+  previewTab = tab;
+  ['stremio','raw','json'].forEach(function(t) {
+    var el = document.getElementById('tab-' + t);
+    el.className = t === tab ? 'px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase bg-indigo-600 text-white cursor-pointer' : 'px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase text-slate-400 hover:text-slate-200 cursor-pointer';
+  });
+  updatePreview();
+}
+
+// === Scenarios ===
+function loadScenario(id) {
+  currentScenario = id;
+  document.querySelectorAll('[data-sc]').forEach(function(b) {
+    b.className = 'px-3 py-1.5 rounded-lg text-[10px] font-medium bg-[#16182c] text-slate-400 border-transparent hover:text-slate-200 cursor-pointer';
+  });
+  document.querySelector('[data-sc="' + id + '"]').className = 'px-3 py-1.5 rounded-lg text-[10px] font-medium bg-indigo-950/40 text-indigo-400 border border-indigo-500/40 cursor-pointer';
+  updatePreview();
+}
+
+// === Preview (FULL template engine) ===
+function updatePreview() {
+  var nt = document.getElementById('name-template').value;
+  var dt = document.getElementById('desc-template').value;
+  var m = MOCK_DATA[currentScenario];
+  var np = '', dp = '';
+  try { np = evaluateTemplate(nt, m); } catch(e) { np = 'Error: ' + e.message; }
+  try { dp = evaluateTemplate(dt, m); } catch(e) { dp = 'Error: ' + e.message; }
+
+  var escapedNp = np.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  var escapedDp = dp.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+  if (previewTab === 'stremio') {
+    document.getElementById('preview-content').innerHTML = '<div class="text-sm font-semibold text-indigo-300">' + escapedNp + '</div><div class="text-xs text-slate-400 whitespace-pre-wrap">' + escapedDp + '</div>';
+  } else if (previewTab === 'raw') {
+    document.getElementById('preview-content').innerHTML = '<pre class="text-xs font-mono text-slate-300 whitespace-pre-wrap">' + escapedNp + '\n---\n' + escapedDp + '</pre>';
+  } else {
+    document.getElementById('preview-content').innerHTML = '<pre class="text-xs font-mono text-slate-300 whitespace-pre-wrap">' + JSON.stringify({ name: np, description: dp }, null, 2) + '</pre>';
+  }
+}
+
+// === URL ===
+function updateUrl() {
+  var params = new URLSearchParams();
+  RESOLUTIONS.forEach(function(r) { params.set(r.key, r.selected ? 'true' : 'false'); });
+  params.set('nameTemplate', document.getElementById('name-template').value);
+  params.set('descriptionTemplate', document.getElementById('desc-template').value);
+  var url = window.location.origin + '/manifest.json?' + params.toString();
+  document.getElementById('url-display').textContent = url;
+  document.getElementById('install-btn').onclick = function() { window.open('stremio://' + url.replace(/^https?:\/\//,''), '_blank'); };
+  document.getElementById('copy-btn').onclick = function() {
+    navigator.clipboard.writeText(url);
+    var b = document.getElementById('copy-btn'); var o = b.innerHTML;
+    b.innerHTML = '✓ Copied!';
+    setTimeout(function() { b.innerHTML = o; }, 2000);
+  };
+}
+
+function showNotification(msg) {
+  var el = document.getElementById('notification');
+  el.textContent = msg;
+  el.classList.remove('hidden');
+  setTimeout(function() { el.classList.add('hidden'); }, 3000);
+}
+
+function resetDefaults() {
+  if (!confirm('Reset to defaults?')) return;
+  document.getElementById('name-template').value = PRESETS.custom.name;
+  document.getElementById('desc-template').value = PRESETS.custom.desc;
+  document.getElementById('preset-select').value = 'custom';
+  currentPreset = 'custom';
+  RESOLUTIONS.forEach(function(r) { r.selected = true; });
+  document.querySelectorAll('#res-grid button').forEach(function(btn, i) {
+    btn.className = 'flex flex-col items-start p-4 rounded-xl border text-left transition-all cursor-pointer bg-[#181a30] border-indigo-500 text-slate-100 ring-1 ring-indigo-500/30';
+  });
+  updateAll();
+}
+
+// === Input handlers ===
+document.getElementById('name-template').addEventListener('input', function() {
+  if (currentPreset !== 'custom') { document.getElementById('preset-select').value = 'custom'; currentPreset = 'custom'; }
+  updateAll();
+});
+document.getElementById('desc-template').addEventListener('input', function() {
+  if (currentPreset !== 'custom') { document.getElementById('preset-select').value = 'custom'; currentPreset = 'custom'; }
+  updateAll();
+});
+
+function updateAll() {
+  var sel = RESOLUTIONS.filter(function(r) { return r.selected; }).length;
+  document.getElementById('res-count').textContent = sel + '/' + RESOLUTIONS.length + ' selected';
+  updatePreview();
+  updateUrl();
+}
+
+updateAll();
+</script>
 </body>
 </html>
