@@ -17,6 +17,7 @@
 // ============================================================================
 
 import puppeteer from 'puppeteer';
+import { scrapeUniversalEmbeds } from './universal_embeds.js';
 import { detectQuality } from './hubcloud.js';
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
@@ -185,10 +186,14 @@ export async function scrapeVAPlayer(title, imdbId, type = 'movie', season = nul
     }
 
     console.log(`  [vaplayer] ✓ ${streams.length} streams`);
-    return streams;
+    if (streams.length > 0) return streams;
+    
+    // Fallback: universal embed (xpass.top) if puppeteer failed
+    console.log(`  [vaplayer] puppeteer returned 0 — using universal embed fallback`);
+    return scrapeUniversalEmbeds(title, imdbId, type, season, episode);
   } catch (e) {
-    console.log(`  [vaplayer] error: ${e.message}`);
-    return [];
+    console.log(`  [vaplayer] error: ${e.message} — using universal embed fallback`);
+    return scrapeUniversalEmbeds(title, imdbId, type, season, episode);
   } finally {
     await page.close().catch(() => {});
   }

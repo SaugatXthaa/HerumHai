@@ -20,6 +20,7 @@
 // ============================================================================
 
 import puppeteer from 'puppeteer';
+import { scrapeUniversalEmbeds } from './universal_embeds.js';
 import { resolveHubCloud, detectQuality, detectAudio, formatFileSize } from './hubcloud.js';
 
 const USER_AGENT = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
@@ -189,10 +190,14 @@ export async function scrapeMoviepire(title, imdbId, type = 'movie', season = nu
     }
 
     console.log(`  [moviepire] ✓ ${streams.length} streams`);
-    return streams;
+    if (streams.length > 0) return streams;
+    
+    // Fallback: universal embed (xpass.top) if puppeteer failed
+    console.log(`  [moviepire] puppeteer returned 0 — using universal embed fallback`);
+    return scrapeUniversalEmbeds(title, imdbId, type, season, episode);
   } catch (e) {
-    console.log(`  [moviepire] error: ${e.message}`);
-    return [];
+    console.log(`  [moviepire] error: ${e.message} — using universal embed fallback`);
+    return scrapeUniversalEmbeds(title, imdbId, type, season, episode);
   } finally {
     await page.close().catch(() => {});
   }

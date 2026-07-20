@@ -32,6 +32,7 @@ import { CF_BLOCKED_SOURCES, closeCFBrowser } from './cf_sources.js';
 import { scrapeAnimeSky, closeBrowser as closeAnimeSkyBrowser } from './animesky.js';
 import { scrapeUniversalEmbeds, scrapeStreameX, closeBrowser as closeUniversalBrowser } from './universal_embeds.js';
 import { scrapeVAPlayer, closeBrowser as closeVAPlayerBrowser } from './vaplayer.js';
+import { scrapeNebula, closeBrowser as closeNebulaBrowser } from './nebula.js';
 import { scrapeMoviesEQ, scrapeCineWave, scrapeTatvaMovies, closeBrowser as closeNewSourcesBrowser } from './new_sources.js';
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
@@ -301,6 +302,23 @@ export const ALL_SOURCES = [
     },
   },
 
+  // NebulaStreams — extracts HubCloud IDs from Nebula's pre-scraped database
+  // and resolves them via OUR HubCloud resolver (NOT proxying)
+  {
+    slug: 'nebula',
+    name: 'NebulaStreams',
+    homepage: 'https://nebula.work.gd',
+    searchPath: '/stream/{type}/{imdb}',
+    type: 'embed',
+    async scrape(target, title) {
+      const imdbId = target.imdbId || (target.rawId && target.rawId.startsWith('tt') ? target.rawId : null);
+      if (!imdbId) return [];
+      const type = target.type === 'anime' ? 'series' : target.type;
+      return scrapeNebula(title, imdbId, type, target.season, target.episode);
+    },
+  },
+
+
   // 1. 4KHDHub.store — dedicated scraper (FSL streams via videasy.to player)
   //    Uses JSON.parse hook to capture decrypted HLS stream URLs
   //    VERIFIED: Returns real 4K/1080p/720p/480p HLS streams
@@ -527,6 +545,7 @@ export async function scrapeAllSources(target, title, timeoutMs = 25000) {
   await closeUniversalBrowser().catch(() => {});
   await closeVAPlayerBrowser().catch(() => {});
   await closeNewSourcesBrowser().catch(() => {});
+  await closeNebulaBrowser().catch(() => {});
 
   console.log(`[sources] total: ${unique.length} unique streams from ${candidates.length} sources`);
   return unique;
