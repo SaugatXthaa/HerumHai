@@ -40,7 +40,10 @@ async function getBrowser() {
     executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
     args: [
       '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
-      '--disable-gpu', 
+      '--disable-gpu',
+      '--single-process',
+      '--no-first-run',
+      '--no-zygote', 
     ],
     defaultViewport: { width: 1366, height: 768 },
   });
@@ -89,6 +92,16 @@ export async function scrape4KHDHub(title, imdbId, type = 'movie', season = null
   // ---------- Phase 2: Browser-based legacy 4khdhub.store scraping ----------
   const browser = await getBrowser();
   const page = await browser.newPage();
+    
+    // Block heavy assets to save memory (HidenCloud optimization)
+    await page.setRequestInterception(true);
+    page.on('request', (req) => {
+      if (['image', 'stylesheet', 'font', 'media'].includes(req.resourceType())) {
+        req.abort();
+      } else {
+        req.continue();
+      }
+    });
   await page.setUserAgent(USER_AGENT);
 
   const capturedStreams = [];

@@ -57,10 +57,20 @@ export async function scrapeHDGharTV(title, imdbId, type = 'movie', season = nul
   const browser = await puppeteer.launch({
     headless: true,
     executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',  '--disable-gpu'],
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--single-process', '--no-first-run', '--no-zygote'],
   });
 
   const page = await browser.newPage();
+    
+    // Block heavy assets to save memory (HidenCloud optimization)
+    await page.setRequestInterception(true);
+    page.on('request', (req) => {
+      if (['image', 'stylesheet', 'font', 'media'].includes(req.resourceType())) {
+        req.abort();
+      } else {
+        req.continue();
+      }
+    });
   await page.setUserAgent(USER_AGENT);
 
   let streamUrl = null;

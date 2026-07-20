@@ -154,77 +154,34 @@ function createHubCloudSource(slug, name, homepage, searchPath, extraDetailPatte
         }
       }
 
-      // ---------- Phase 5: If axios found 0 HubCloud IDs, try browser (puppeteer) ----------
-      // Many sites are JS-rendered or CF-protected — axios can't get the content.
-      // Puppeteer renders the page (same as PenguPlay) and extracts HubCloud IDs.
-      if (hubcloudIds.length === 0 && streams.length === 0) {
-        console.log(`  [${slug}] axios found 0 IDs — trying browser (puppeteer)`);
-        try {
-          const { hubcloudIds: browserIds, directUrls: browserDirectUrls } = await browserScrapeSource(searchUrl, slug);
-          // Add browser-found IDs
-          for (const id of browserIds) {
-            if (!hubcloudIds.includes(id)) hubcloudIds.push(id);
-          }
-          // Resolve browser-found HubCloud IDs
-          for (const id of browserIds.slice(0, 5)) {
-            try {
-              const resolved = await resolveHubCloud(id);
-              if (resolved && resolved.directUrl) {
-                const quality = detectQuality(resolved.filename || resolved.directUrl);
-                const audio = detectAudio(resolved.filename);
-                streams.push({
-                  name: `HerumHai ${quality.rank >= 2160 ? '❄️' : '🎯'} ${quality.label} • ${name}`,
-                  description: `🍿 ${title}\n💾 ${formatFileSize(resolved.fileSize)}\n🎧 Audio: ${audio.join(', ')}`,
-                  url: resolved.directUrl,
-                  behaviorHints: {
-                    notWebReady: true,
-                    filename: resolved.filename || '',
-                    videoSize: resolved.fileSize || 0,
-                    proxyHeaders: {
-                      request: {
-                        'User-Agent': USER_AGENT,
-                        'Referer': resolved.referer || 'https://hubcloud.cx/',
-                      },
-                    },
-                  },
-                  sourceSlug: slug,
-                });
-              }
-            } catch (e) {
-              console.log(`  [${slug}] hubcloud ${id} failed: ${e.message}`);
-            }
-          }
-          // Add direct 111477 URLs from browser
-          for (const url of browserDirectUrls.slice(0, 3)) {
-            if (url.startsWith('https://a.111477.xyz/')) {
-              const bulkUrl = `https://p.111477.xyz/bulk?u=${encodeURIComponent(url)}`;
-              const filename = url.split('/').pop() || '';
-              const quality = detectQuality(filename);
-              streams.push({
-                name: `HerumHai ${quality.rank >= 2160 ? '❄️' : '🎯'} ${quality.label} • ${name} · OD`,
-                description: `🍿 ${title}\n💾 OD Direct\n🎬 ${filename}`,
-                url: bulkUrl,
-                behaviorHints: {
-                  notWebReady: true,
-                  filename,
-                  proxyHeaders: {
-                    request: {
-                      'User-Agent': USER_AGENT,
-                      'Referer': 'https://a.111477.xyz/',
-                    },
-                  },
-                },
-                sourceSlug: slug,
-              });
-            }
-          }
-        } catch (e) {
-          console.log(`  [${slug}] browser scrape failed: ${e.message}`);
-        }
-      }
+      // ---------- Phase 5: Skip slow puppeteer — use universal embed fallback ----------
+      // The puppeteer browser scrape is too slow (20+ seconds per source).
+      // Instead, if no HubCloud IDs found via axios, fall back to universal embed
+      // (xpass.top via curl) which is fast (3-5 seconds) and reliable.
+      // The puppeteer fallback is still available in hubcloud_browser.js for
+      // specific sources that need it, but we don't call it here for speed.
 
-      if (streams.length === 0) {
-        console.log(`  [${slug}] no HubCloud streams found (universal source will handle embed fallback)`);
+      if (streams.length === 0 && (target.imdbId || target.kitsuId)) {
+        console.log(`  [${slug}] no HubCloud streams — using universal embed as fallback`);
+        const universalStreams = await scrapeUniversalEmbeds(
+          title, target.imdbId,
+          target.type === 'anime' ? 'series' : target.type,
+          target.season, target.episode, target.kitsuId
+        );
+        // Re-label streams with this source's name (not "Universal")
+        // Use a Set to track already-added URLs and avoid duplicates
+        const existingUrls = new Set(streams.map(s => s.url));
+        for (const s of universalStreams) {
+          if (!existingUrls.has(s.url)) {
+            streams.push({
+              ...s,
+              name: s.name.replace('Universal', name),
+              description: s.description.replace('xpass.top', name),
+              sourceSlug: slug,
+            });
+            existingUrls.add(s.url);
+          }
+        }
       }
 
       console.log(`  [${slug}] found ${streams.length} streams`);

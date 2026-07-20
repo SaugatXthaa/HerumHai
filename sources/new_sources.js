@@ -57,7 +57,10 @@ async function getBrowser() {
   _browser = await puppeteer.launch({
     headless: true,
     executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu',  '--disable-blink-features=AutomationControlled'],
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu',
+      '--single-process',
+      '--no-first-run',
+      '--no-zygote',  '--disable-blink-features=AutomationControlled'],
     defaultViewport: { width: 1920, height: 1080 },
   });
   return _browser;
@@ -67,6 +70,16 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function scrapeWithPuppeteer(embedUrl, sourceName, title, referer) {
   const browser = await getBrowser();
   const page = await browser.newPage();
+    
+    // Block heavy assets to save memory (HidenCloud optimization)
+    await page.setRequestInterception(true);
+    page.on('request', (req) => {
+      if (['image', 'stylesheet', 'font', 'media'].includes(req.resourceType())) {
+        req.abort();
+      } else {
+        req.continue();
+      }
+    });
   await page.setUserAgent(DESKTOP_UA);
   if (referer) await page.setExtraHTTPHeaders({ Referer: referer, 'Accept-Language': 'en-US,en;q=0.9' });
 
