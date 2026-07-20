@@ -147,41 +147,16 @@
       </div>
     </div>
 
-    <!-- Preview -->
+    <!-- Preview (content only — header/tabs/scenario chips removed per user request) -->
     <div class="border border-[#1f2136] bg-[#0b0c16] rounded-2xl overflow-hidden">
-      <div class="border-b border-[#1f2136] px-4 py-3 bg-[#121323] flex items-center justify-between">
-        <div class="flex items-center gap-2">
-          <span class="w-2.5 h-2.5 rounded-full bg-indigo-500 animate-pulse"></span>
-          <span class="text-xs font-bold text-slate-200 font-mono uppercase tracking-widest">Preview</span>
-        </div>
-        <div class="flex items-center gap-1 bg-[#0b0c16] p-1 rounded-xl border border-[#1f2136]">
-          <button onclick="setTab('stremio')" id="tab-stremio" class="px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase bg-indigo-600 text-white cursor-pointer">📺 Stremio UI</button>
-          <button onclick="setTab('raw')" id="tab-raw" class="px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase text-slate-400 hover:text-slate-200 cursor-pointer">📝 Raw</button>
-          <button onclick="setTab('json')" id="tab-json" class="px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase text-slate-400 hover:text-slate-200 cursor-pointer">🗄️ JSON</button>
-        </div>
-      </div>
       <div class="p-4 space-y-3">
-        <div class="flex flex-wrap gap-1.5 mb-3" id="scenario-btns">
-          <button onclick="loadScenario('4k')" data-sc="4k" class="px-3 py-1.5 rounded-lg text-[10px] font-medium bg-indigo-950/40 text-indigo-400 border border-indigo-500/40 cursor-pointer">🎬 4K BluRay</button>
-          <button onclick="loadScenario('1080')" data-sc="1080" class="px-3 py-1.5 rounded-lg text-[10px] font-medium bg-[#16182c] text-slate-400 border-transparent hover:text-slate-200 cursor-pointer">📺 1080p WEB-DL</button>
-          <button onclick="loadScenario('anime')" data-sc="anime" class="px-3 py-1.5 rounded-lg text-[10px] font-medium bg-[#16182c] text-slate-400 border-transparent hover:text-slate-200 cursor-pointer">🌸 Anime</button>
-        </div>
         <div id="preview-content" class="bg-black/50 rounded-xl p-4 space-y-2 min-h-[80px]"></div>
       </div>
     </div>
   </div>
 
-  <!-- 3rd: Install + Copy -->
+  <!-- 3rd: Install buttons only — section header + URL display removed per user request -->
   <div class="bg-[#111222] border border-[#1b1d30] rounded-2xl p-6 shadow-xl space-y-6">
-    <div class="flex items-center gap-3">
-      <div class="bg-indigo-950/40 p-2.5 rounded-xl border border-indigo-500/20 text-indigo-400">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
-      </div>
-      <div>
-        <h2 class="text-lg font-semibold text-slate-100 tracking-wide">Install</h2>
-        <p class="text-xs text-slate-400">Deploy to Stremio</p>
-      </div>
-    </div>
     <div class="flex flex-wrap gap-3">
       <button id="install-btn" class="flex items-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-500 text-white font-semibold text-sm hover:shadow-lg cursor-pointer">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
@@ -190,9 +165,6 @@
       <button id="copy-btn" class="flex items-center gap-2 px-6 py-3 rounded-xl bg-[#1e2035] border border-[#2b2e4c] text-slate-300 font-semibold text-sm hover:bg-[#252848] cursor-pointer">
         Copy Addon URL
       </button>
-    </div>
-    <div class="bg-[#0b0c16]/50 border border-[#1f2136] rounded-xl p-4">
-      <div class="text-xs font-mono text-slate-500 break-all" id="url-display">Loading...</div>
     </div>
   </div>
 
@@ -203,7 +175,367 @@
 
 <script>
 // === TEMPLATE ENGINE (from Configure-WebUI) ===
+function toSmallCaps(str) {
+  const map = {
+    a:"ᴀ",b:"ʙ",c:"ᴄ",d:"ᴅ",e:"ᴇ",f:"ꜰ",g:"ɢ",h:"ʜ",i:"ɪ",j:"ᴊ",k:"ᴋ",l:"ʟ",m:"ᴍ",n:"ɴ",o:"ᴏ",p:"ᴘ",q:"q",r:"ʀ",s:"ꜱ",t:"ᴛ",u:"ᴜ",v:"ᴠ",w:"ᴡ",x:"x",y:"ʏ",z:"ᴢ",
+    A:"ᴀ",B:"ʙ",C:"ᴄ",D:"ᴅ",E:"ᴇ",F:"ꜰ",G:"ɢ",H:"ʜ",I:"ɪ",J:"ᴊ",K:"ᴋ",L:"ʟ",M:"ᴍ",N:"ɴ",O:"ᴏ",P:"ᴘ",Q:"q",R:"ʀ",S:"ꜱ",T:"ᴛ",U:"ᴜ",V:"ᴠ",W:"ᴡ",X:"x",Y:"ʏ",Z:"ᴢ",
+  };
+  return String(str).split("").map(function(c) { return map[c] || c; }).join("");
+}
 
+// Splits a string by delimiter but only at the top-level (ignoring nested structures and quotes)
+function splitTopLevel(str, delimiter) {
+  const parts = [];
+  let current = "";
+  let curlyDepth = 0;
+  let bracketDepth = 0;
+  let parenDepth = 0;
+  let inSingleQuote = false;
+  let inDoubleQuote = false;
+
+  for (let i = 0; i < str.length; i++) {
+    const char = str[i];
+
+    if (char === "\\" && (str[i + 1] === "'" || str[i + 1] === '"' || char === "\\")) {
+      current += str[i + 1];
+      i++;
+      continue;
+    }
+
+    if (char === "'" && !inDoubleQuote) {
+      inSingleQuote = !inSingleQuote;
+      current += char;
+    } else if (char === '"' && !inSingleQuote) {
+      inDoubleQuote = !inDoubleQuote;
+      current += char;
+    } else if (!inSingleQuote && !inDoubleQuote) {
+      if (char === "{") curlyDepth++;
+      else if (char === "}") curlyDepth--;
+      else if (char === "[") bracketDepth++;
+      else if (char === "]") bracketDepth--;
+      else if (char === "(") parenDepth++;
+      else if (char === ")") parenDepth--;
+
+      if (
+        curlyDepth === 0 &&
+        bracketDepth === 0 &&
+        parenDepth === 0 &&
+        str.substring(i, i + delimiter.length) === delimiter
+      ) {
+        parts.push(current);
+        current = "";
+        i += delimiter.length - 1; // skip delimiter
+        continue;
+      }
+      current += char;
+    } else {
+      current += char;
+    }
+  }
+  parts.push(current);
+  return parts;
+}
+
+// Cleans surrounding quotes from options
+function cleanQuotes(str) {
+  str = str.trim();
+  if (
+    (str.startsWith('"') && str.endsWith('"')) ||
+    (str.startsWith("'") && str.endsWith("'")) ||
+    (str.startsWith("`") && str.endsWith("`"))
+  ) {
+    return str.substring(1, str.length - 1);
+  }
+  if (str.startsWith('\\"') && str.endsWith('\\"')) {
+    return str.substring(2, str.length - 2);
+  }
+  return str;
+}
+
+// Resolves dot-notation path inside data object
+function resolvePath(path, data) {
+  const parts = path.trim().split(".");
+  let val = data;
+  for (const p of parts) {
+    if (val === undefined || val === null) return undefined;
+    val = val[p];
+  }
+  return val;
+}
+
+// Parses logical expressions with operators ::and:: and ::or::
+function parseLogicalExpression(str) {
+  const segments = [];
+  const operators = [];
+  let current = "";
+  let curlyDepth = 0;
+  let bracketDepth = 0;
+  let parenDepth = 0;
+  let inSingleQuote = false;
+  let inDoubleQuote = false;
+
+  for (let i = 0; i < str.length; i++) {
+    const char = str[i];
+
+    if (char === "\\" && (str[i + 1] === "'" || str[i + 1] === '"' || char === "\\")) {
+      current += str[i + 1];
+      i++;
+      continue;
+    }
+
+    if (char === "'" && !inDoubleQuote) {
+      inSingleQuote = !inSingleQuote;
+      current += char;
+    } else if (char === '"' && !inSingleQuote) {
+      inDoubleQuote = !inDoubleQuote;
+      current += char;
+    } else if (!inSingleQuote && !inDoubleQuote) {
+      if (char === "{") curlyDepth++;
+      else if (char === "}") curlyDepth--;
+      else if (char === "[") bracketDepth++;
+      else if (char === "]") bracketDepth--;
+      else if (char === "(") parenDepth++;
+      else if (char === ")") parenDepth--;
+
+      if (curlyDepth === 0 && bracketDepth === 0 && parenDepth === 0) {
+        if (str.substring(i, i + 7) === "::and::") {
+          segments.push(current);
+          operators.push("and");
+          current = "";
+          i += 6; // skip delimiter
+          continue;
+        } else if (str.substring(i, i + 6) === "::or::") {
+          segments.push(current);
+          operators.push("or");
+          current = "";
+          i += 5; // skip delimiter
+          continue;
+        }
+      }
+      current += char;
+    } else {
+      current += char;
+    }
+  }
+  segments.push(current);
+  return { segments, operators };
+}
+
+// Evaluates a single filter segment on a resolved value
+function evaluateSegment(segment, data) {
+  const parts = splitTopLevel(segment, "::");
+  const path = parts[0];
+  let currentVal = resolvePath(path, data);
+
+  for (let i = 1; i < parts.length; i++) {
+    const filterString = parts[i].trim();
+    if (!filterString) continue;
+
+    let filterName = filterString;
+    let args = [];
+    if (filterName.includes("(")) {
+      const openParen = filterName.indexOf("(");
+      const closeParen = filterName.lastIndexOf(")");
+      if (closeParen > openParen) {
+        const argsStr = filterName.substring(openParen + 1, closeParen);
+        args = splitTopLevel(argsStr, ",").map(a => cleanQuotes(a));
+        filterName = filterName.substring(0, openParen).trim();
+      }
+    }
+
+    if (filterName === "istrue") {
+      currentVal = (currentVal === true || String(currentVal) === "true");
+    } else if (filterName === "isfalse") {
+      currentVal = (currentVal === false || String(currentVal) === "false" || currentVal === undefined || currentVal === null);
+    } else if (filterName === "exists") {
+      if (Array.isArray(currentVal)) {
+        currentVal = currentVal.length > 0;
+      } else {
+        currentVal = (currentVal !== undefined && currentVal !== null && currentVal !== "");
+      }
+    } else if (filterName === "lower") {
+      currentVal = String(currentVal ?? "").toLowerCase();
+    } else if (filterName === "upper") {
+      currentVal = String(currentVal ?? "").toUpperCase();
+    } else if (filterName === "string") {
+      currentVal = String(currentVal ?? "");
+    } else if (filterName === "smallcaps") {
+      currentVal = toSmallCaps(String(currentVal ?? ""));
+    } else if (filterName === "star") {
+      const score = Number(currentVal ?? 0);
+      const stars = Math.round(score / 20);
+      currentVal = "★".repeat(stars) + "☆".repeat(5 - stars);
+    } else if (filterName === "time") {
+      const seconds = Number(currentVal ?? 0);
+      const hours = Math.floor(seconds / 3600);
+      const minutes = Math.floor((seconds % 3600) / 60);
+      const secs = seconds % 60;
+      currentVal = `${hours}h:${minutes}m:${secs}s`;
+    } else if (filterName === "sbytes") {
+      const bytes = Number(currentVal);
+      if (!isNaN(bytes)) {
+        if (bytes >= 1073741824) {
+          currentVal = (bytes / 1073741824).toFixed(1) + " GB";
+        } else if (bytes >= 1048576) {
+          currentVal = (bytes / 1048576).toFixed(0) + " MB";
+        } else {
+          currentVal = bytes + " B";
+        }
+      } else {
+        currentVal = String(currentVal ?? "");
+      }
+    } else if (filterName === "sbitrate") {
+      const bps = Number(currentVal);
+      if (!isNaN(bps)) {
+        currentVal = (bps / 1000000).toFixed(1) + " Mbps";
+      } else {
+        currentVal = String(currentVal ?? "");
+      }
+    } else if (filterName === "join") {
+      if (Array.isArray(currentVal)) {
+        currentVal = currentVal.join(args[0] || "");
+      } else {
+        currentVal = String(currentVal ?? "");
+      }
+    } else if (filterName === "sort") {
+      if (Array.isArray(currentVal)) {
+        currentVal = [...currentVal].sort();
+      }
+    } else if (filterName === "lsort") {
+      if (Array.isArray(currentVal)) {
+        currentVal = [...currentVal].sort((a, b) => String(a).toLowerCase().localeCompare(String(b).toLowerCase()));
+      }
+    } else if (filterName === "truncate") {
+      const limit = parseInt(args[0] || "40", 10);
+      const str = String(currentVal ?? "");
+      currentVal = str.length > limit ? str.substring(0, limit) + "..." : str;
+    } else if (filterName === "replace") {
+      const search = args[0] || "";
+      const replaceWith = args[1] !== undefined ? args[1] : "";
+      currentVal = String(currentVal ?? "").split(search).join(replaceWith);
+    } else if (filterName.startsWith("=")) {
+      const target = filterName.substring(1);
+      currentVal = (String(currentVal ?? "") === target);
+    } else if (filterName.startsWith("~")) {
+      const target = filterName.substring(1);
+      currentVal = String(currentVal ?? "").toLowerCase().includes(target.toLowerCase());
+    } else if (filterName.startsWith(">")) {
+      const target = Number(filterName.substring(1));
+      currentVal = (Number(currentVal ?? 0) > target);
+    } else if (filterName.startsWith("<")) {
+      const target = Number(filterName.substring(1));
+      currentVal = (Number(currentVal ?? 0) < target);
+    }
+  }
+
+  return currentVal;
+}
+
+// Evaluates complex chained conditions
+function evaluateCondition(conditionStr, data) {
+  const { segments, operators } = parseLogicalExpression(conditionStr);
+  if (segments.length === 0) return false;
+
+  const values = segments.map(seg => {
+    const val = evaluateSegment(seg, data);
+    return !!val;
+  });
+
+  const stepValues = [...values];
+  const stepOperators = [...operators];
+
+  for (let i = 0; i < stepOperators.length; i++) {
+    if (stepOperators[i] === "and") {
+      const val1 = stepValues[i];
+      const val2 = stepValues[i + 1];
+      stepValues.splice(i, 2, val1 && val2);
+      stepOperators.splice(i, 1);
+      i--;
+    }
+  }
+
+  let result = stepValues[0];
+  for (let i = 0; i < stepOperators.length; i++) {
+    if (stepOperators[i] === "or") {
+      result = result || stepValues[i + 1];
+    }
+  }
+
+  return result;
+}
+
+// Evaluates a single template token
+function evaluateToken(token, data) {
+  try {
+    let bracketStart = -1;
+    let bracketDepth = 0;
+    for (let i = token.length - 1; i >= 0; i--) {
+      if (token[i] === "]") {
+        bracketDepth++;
+      } else if (token[i] === "[") {
+        bracketDepth--;
+        if (bracketDepth === 0) {
+          bracketStart = i;
+          break;
+        }
+      }
+    }
+
+    if (bracketStart !== -1) {
+      const conditionStr = token.substring(0, bracketStart).trim();
+      const bracketContent = token.substring(bracketStart + 1, token.length - 1);
+      const options = splitTopLevel(bracketContent, "||").map(opt => cleanQuotes(opt));
+      const trueOpt = options[0] || "";
+      const falseOpt = options[1] || "";
+
+      const isTrue = evaluateCondition(conditionStr, data);
+      const chosenOption = isTrue ? trueOpt : falseOpt;
+
+      return evaluateTemplate(chosenOption, data);
+    } else {
+      const result = evaluateSegment(token, data);
+      return result !== undefined && result !== null ? String(result) : "";
+    }
+  } catch (err) {
+    console.error("Error evaluating token:", token, err);
+    return "";
+  }
+}
+
+// Main template evaluation engine - fully recursive and robust
+function evaluateTemplate(template, data) {
+  if (!template) return "";
+  let result = "";
+  let i = 0;
+
+  while (i < template.length) {
+    if (template[i] === "{") {
+      // Find matching }
+      let balance = 1;
+      let j = i + 1;
+      while (j < template.length && balance > 0) {
+        if (template[j] === "{") balance++;
+        else if (template[j] === "}") balance--;
+        j++;
+      }
+
+      if (balance === 0) {
+        const tokenContent = template.substring(i + 1, j - 1);
+        const evaluatedToken = evaluateToken(tokenContent, data);
+        result += evaluatedToken;
+        i = j;
+      } else {
+        result += template[i];
+        i++;
+      }
+    } else {
+      result += template[i];
+      i++;
+    }
+  }
+
+  return result;
+}
 
 // === STATE ===
 const PRESETS = {
@@ -229,8 +561,8 @@ const MOCK_DATA = {
 };
 
 let currentPreset = 'custom';
-let currentScenario = '4k';
-let previewTab = 'stremio';
+const currentScenario = '4k';
+const previewTab = 'stremio';
 let savedPresets = [];
 try { savedPresets = JSON.parse(localStorage.getItem('herumhai_saved_formatters') || '[]'); } catch(e) {}
 
@@ -338,25 +670,11 @@ document.getElementById('file-input').addEventListener('change', function(e) {
   e.target.value = '';
 });
 
-// === Preview Tabs ===
-function setTab(tab) {
-  previewTab = tab;
-  ['stremio','raw','json'].forEach(function(t) {
-    var el = document.getElementById('tab-' + t);
-    el.className = t === tab ? 'px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase bg-indigo-600 text-white cursor-pointer' : 'px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase text-slate-400 hover:text-slate-200 cursor-pointer';
-  });
-  updatePreview();
-}
+// === Preview Tabs (UI removed — kept as safe no-ops in case of stray calls) ===
+function setTab(tab) { /* tab buttons removed per user request */ }
 
-// === Scenarios ===
-function loadScenario(id) {
-  currentScenario = id;
-  document.querySelectorAll('[data-sc]').forEach(function(b) {
-    b.className = 'px-3 py-1.5 rounded-lg text-[10px] font-medium bg-[#16182c] text-slate-400 border-transparent hover:text-slate-200 cursor-pointer';
-  });
-  document.querySelector('[data-sc="' + id + '"]').className = 'px-3 py-1.5 rounded-lg text-[10px] font-medium bg-indigo-950/40 text-indigo-400 border border-indigo-500/40 cursor-pointer';
-  updatePreview();
-}
+// === Scenarios (UI removed — kept as safe no-ops in case of stray calls) ===
+function loadScenario(id) { /* scenario chips removed per user request */ }
 
 // === Preview (FULL template engine) ===
 function updatePreview() {
@@ -379,14 +697,13 @@ function updatePreview() {
   }
 }
 
-// === URL ===
+// === URL (display block removed — only used internally for install/copy buttons) ===
 function updateUrl() {
   var params = new URLSearchParams();
   RESOLUTIONS.forEach(function(r) { params.set(r.key, r.selected ? 'true' : 'false'); });
   params.set('nameTemplate', document.getElementById('name-template').value);
   params.set('descriptionTemplate', document.getElementById('desc-template').value);
   var url = window.location.origin + '/manifest.json?' + params.toString();
-  document.getElementById('url-display').textContent = url;
   document.getElementById('install-btn').onclick = function() { window.open('stremio://' + url.replace(/^https?:\/\//,''), '_blank'); };
   document.getElementById('copy-btn').onclick = function() {
     navigator.clipboard.writeText(url);

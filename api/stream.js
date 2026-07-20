@@ -1603,49 +1603,547 @@ function filterByQuality(streams, userConfig) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Template Engine — ported from public/index.html (Configure-WebUI)
+// ----------------------------------------------------------------------------
+// This is the SAME engine that powers the live preview in the configurator
+// page. Porting it here means streams served to Stremio/Nuvio use the
+// EXACT formatter the user configured in the WebUI — including all the
+// fancy ::istrue, ::exists, ::replace, ::smallcaps, ::and::, ::or::,
+// and [...||...] conditional syntax.
+//
+// Source: public/index.html <script> block. Keep in sync if the WebUI
+// engine changes.
+// ---------------------------------------------------------------------------
+
+function toSmallCaps(str) {
+  const map = {
+    a:"ᴀ",b:"ʙ",c:"ᴄ",d:"ᴅ",e:"ᴇ",f:"ꜰ",g:"ɢ",h:"ʜ",i:"ɪ",j:"ᴊ",k:"ᴋ",l:"ʟ",m:"ᴍ",n:"ɴ",o:"ᴏ",p:"ᴘ",q:"q",r:"ʀ",s:"ꜱ",t:"ᴛ",u:"ᴜ",v:"ᴠ",w:"ᴡ",x:"x",y:"ʏ",z:"ᴢ",
+    A:"ᴀ",B:"ʙ",C:"ᴄ",D:"ᴅ",E:"ᴇ",F:"ꜰ",G:"ɢ",H:"ʜ",I:"ɪ",J:"ᴊ",K:"ᴋ",L:"ʟ",M:"ᴍ",N:"ɴ",O:"ᴏ",P:"ᴘ",Q:"q",R:"ʀ",S:"ꜱ",T:"ᴛ",U:"ᴜ",V:"ᴠ",W:"ᴡ",X:"x",Y:"ʏ",Z:"ᴢ",
+  };
+  return String(str).split("").map(function(c) { return map[c] || c; }).join("");
+}
+
+function splitTopLevel(str, delimiter) {
+  const parts = [];
+  let current = "";
+  let curlyDepth = 0, bracketDepth = 0, parenDepth = 0;
+  let inSingleQuote = false, inDoubleQuote = false;
+  for (let i = 0; i < str.length; i++) {
+    const char = str[i];
+    if (char === "\\" && (str[i + 1] === "'" || str[i + 1] === '"' || char === "\\")) {
+      current += str[i + 1]; i++; continue;
+    }
+    if (char === "'" && !inDoubleQuote) { inSingleQuote = !inSingleQuote; current += char; }
+    else if (char === '"' && !inSingleQuote) { inDoubleQuote = !inDoubleQuote; current += char; }
+    else if (!inSingleQuote && !inDoubleQuote) {
+      if (char === "{") curlyDepth++;
+      else if (char === "}") curlyDepth--;
+      else if (char === "[") bracketDepth++;
+      else if (char === "]") bracketDepth--;
+      else if (char === "(") parenDepth++;
+      else if (char === ")") parenDepth--;
+      if (curlyDepth === 0 && bracketDepth === 0 && parenDepth === 0 &&
+          str.substring(i, i + delimiter.length) === delimiter) {
+        parts.push(current); current = "";
+        i += delimiter.length - 1; continue;
+      }
+      current += char;
+    } else { current += char; }
+  }
+  parts.push(current);
+  return parts;
+}
+
+function cleanQuotes(str) {
+  str = str.trim();
+  if ((str.startsWith('"') && str.endsWith('"')) ||
+      (str.startsWith("'") && str.endsWith("'")) ||
+      (str.startsWith("`") && str.endsWith("`"))) {
+    return str.substring(1, str.length - 1);
+  }
+  if (str.startsWith('\\"') && str.endsWith('\\"')) {
+    return str.substring(2, str.length - 2);
+  }
+  return str;
+}
+
+function resolvePath(path, data) {
+  const parts = path.trim().split(".");
+  let val = data;
+  for (const p of parts) {
+    if (val === undefined || val === null) return undefined;
+    val = val[p];
+  }
+  return val;
+}
+
+function parseLogicalExpression(str) {
+  const segments = [];
+  const operators = [];
+  let current = "";
+  let curlyDepth = 0, bracketDepth = 0, parenDepth = 0;
+  let inSingleQuote = false, inDoubleQuote = false;
+  for (let i = 0; i < str.length; i++) {
+    const char = str[i];
+    if (char === "\\" && (str[i + 1] === "'" || str[i + 1] === '"' || char === "\\")) {
+      current += str[i + 1]; i++; continue;
+    }
+    if (char === "'" && !inDoubleQuote) { inSingleQuote = !inSingleQuote; current += char; }
+    else if (char === '"' && !inSingleQuote) { inDoubleQuote = !inDoubleQuote; current += char; }
+    else if (!inSingleQuote && !inDoubleQuote) {
+      if (char === "{") curlyDepth++;
+      else if (char === "}") curlyDepth--;
+      else if (char === "[") bracketDepth++;
+      else if (char === "]") bracketDepth--;
+      else if (char === "(") parenDepth++;
+      else if (char === ")") parenDepth--;
+      if (curlyDepth === 0 && bracketDepth === 0 && parenDepth === 0) {
+        if (str.substring(i, i + 7) === "::and::") {
+          segments.push(current); operators.push("and");
+          current = ""; i += 6; continue;
+        } else if (str.substring(i, i + 6) === "::or::") {
+          segments.push(current); operators.push("or");
+          current = ""; i += 5; continue;
+        }
+      }
+      current += char;
+    } else { current += char; }
+  }
+  segments.push(current);
+  return { segments, operators };
+}
+
+function evaluateSegment(segment, data) {
+  const parts = splitTopLevel(segment, "::");
+  const path = parts[0];
+  let currentVal = resolvePath(path, data);
+
+  for (let i = 1; i < parts.length; i++) {
+    const filterString = parts[i].trim();
+    if (!filterString) continue;
+
+    let filterName = filterString;
+    let args = [];
+    if (filterName.includes("(")) {
+      const openParen = filterName.indexOf("(");
+      const closeParen = filterName.lastIndexOf(")");
+      if (closeParen > openParen) {
+        const argsStr = filterName.substring(openParen + 1, closeParen);
+        args = splitTopLevel(argsStr, ",").map(a => cleanQuotes(a));
+        filterName = filterName.substring(0, openParen).trim();
+      }
+    }
+
+    if (filterName === "istrue") {
+      currentVal = (currentVal === true || String(currentVal) === "true");
+    } else if (filterName === "isfalse") {
+      currentVal = (currentVal === false || String(currentVal) === "false" || currentVal === undefined || currentVal === null);
+    } else if (filterName === "exists") {
+      if (Array.isArray(currentVal)) currentVal = currentVal.length > 0;
+      else currentVal = (currentVal !== undefined && currentVal !== null && currentVal !== "");
+    } else if (filterName === "lower") {
+      currentVal = String(currentVal ?? "").toLowerCase();
+    } else if (filterName === "upper") {
+      currentVal = String(currentVal ?? "").toUpperCase();
+    } else if (filterName === "string") {
+      currentVal = String(currentVal ?? "");
+    } else if (filterName === "smallcaps") {
+      currentVal = toSmallCaps(String(currentVal ?? ""));
+    } else if (filterName === "star") {
+      const score = Number(currentVal ?? 0);
+      const stars = Math.round(score / 20);
+      currentVal = "★".repeat(stars) + "☆".repeat(5 - stars);
+    } else if (filterName === "time") {
+      const seconds = Number(currentVal ?? 0);
+      const hours = Math.floor(seconds / 3600);
+      const minutes = Math.floor((seconds % 3600) / 60);
+      const secs = seconds % 60;
+      currentVal = `${hours}h:${minutes}m:${secs}s`;
+    } else if (filterName === "sbytes") {
+      const bytes = Number(currentVal);
+      if (!isNaN(bytes)) {
+        if (bytes >= 1073741824) currentVal = (bytes / 1073741824).toFixed(1) + " GB";
+        else if (bytes >= 1048576) currentVal = (bytes / 1048576).toFixed(0) + " MB";
+        else currentVal = bytes + " B";
+      } else currentVal = String(currentVal ?? "");
+    } else if (filterName === "sbitrate") {
+      const bps = Number(currentVal);
+      if (!isNaN(bps)) currentVal = (bps / 1000000).toFixed(1) + " Mbps";
+      else currentVal = String(currentVal ?? "");
+    } else if (filterName === "join") {
+      if (Array.isArray(currentVal)) currentVal = currentVal.join(args[0] || "");
+      else currentVal = String(currentVal ?? "");
+    } else if (filterName === "sort") {
+      if (Array.isArray(currentVal)) currentVal = [...currentVal].sort();
+    } else if (filterName === "lsort") {
+      if (Array.isArray(currentVal)) currentVal = [...currentVal].sort((a, b) => String(a).toLowerCase().localeCompare(String(b).toLowerCase()));
+    } else if (filterName === "truncate") {
+      const limit = parseInt(args[0] || "40", 10);
+      const s = String(currentVal ?? "");
+      currentVal = s.length > limit ? s.substring(0, limit) + "..." : s;
+    } else if (filterName === "replace") {
+      const search = args[0] || "";
+      const replaceWith = args[1] !== undefined ? args[1] : "";
+      currentVal = String(currentVal ?? "").split(search).join(replaceWith);
+    } else if (filterName.startsWith("=")) {
+      const target = filterName.substring(1);
+      currentVal = (String(currentVal ?? "") === target);
+    } else if (filterName.startsWith("~")) {
+      const target = filterName.substring(1);
+      currentVal = String(currentVal ?? "").toLowerCase().includes(target.toLowerCase());
+    } else if (filterName.startsWith(">")) {
+      const target = Number(filterName.substring(1));
+      currentVal = (Number(currentVal ?? 0) > target);
+    } else if (filterName.startsWith("<")) {
+      const target = Number(filterName.substring(1));
+      currentVal = (Number(currentVal ?? 0) < target);
+    }
+  }
+  return currentVal;
+}
+
+function evaluateCondition(conditionStr, data) {
+  const { segments, operators } = parseLogicalExpression(conditionStr);
+  if (segments.length === 0) return false;
+  const values = segments.map(seg => !!evaluateSegment(seg, data));
+  const stepValues = [...values];
+  const stepOperators = [...operators];
+  for (let i = 0; i < stepOperators.length; i++) {
+    if (stepOperators[i] === "and") {
+      const v1 = stepValues[i], v2 = stepValues[i + 1];
+      stepValues.splice(i, 2, v1 && v2);
+      stepOperators.splice(i, 1);
+      i--;
+    }
+  }
+  let result = stepValues[0];
+  for (let i = 0; i < stepOperators.length; i++) {
+    if (stepOperators[i] === "or") result = result || stepValues[i + 1];
+  }
+  return result;
+}
+
+function evaluateToken(token, data) {
+  try {
+    let bracketStart = -1;
+    let bracketDepth = 0;
+    for (let i = token.length - 1; i >= 0; i--) {
+      if (token[i] === "]") { bracketDepth++; }
+      else if (token[i] === "[") {
+        bracketDepth--;
+        if (bracketDepth === 0) { bracketStart = i; break; }
+      }
+    }
+    if (bracketStart !== -1) {
+      const conditionStr = token.substring(0, bracketStart).trim();
+      const bracketContent = token.substring(bracketStart + 1, token.length - 1);
+      const options = splitTopLevel(bracketContent, "||").map(opt => cleanQuotes(opt));
+      const trueOpt = options[0] || "";
+      const falseOpt = options[1] || "";
+      const isTrue = evaluateCondition(conditionStr, data);
+      const chosenOption = isTrue ? trueOpt : falseOpt;
+      return evaluateTemplate(chosenOption, data);
+    } else {
+      const result = evaluateSegment(token, data);
+      return result !== undefined && result !== null ? String(result) : "";
+    }
+  } catch (err) {
+    console.error("[formatter] token error:", token, err.message);
+    return "";
+  }
+}
+
+function evaluateTemplate(template, data) {
+  if (!template) return "";
+  let result = "";
+  let i = 0;
+  while (i < template.length) {
+    if (template[i] === "{") {
+      let balance = 1;
+      let j = i + 1;
+      while (j < template.length && balance > 0) {
+        if (template[j] === "{") balance++;
+        else if (template[j] === "}") balance--;
+        j++;
+      }
+      if (balance === 0) {
+        const tokenContent = template.substring(i + 1, j - 1);
+        result += evaluateToken(tokenContent, data);
+        i = j;
+      } else {
+        result += template[i]; i++;
+      }
+    } else {
+      result += template[i]; i++;
+    }
+  }
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Stream info extraction → rich data object for the template engine
+// ----------------------------------------------------------------------------
+// The user's formatter templates reference many fields like
+// {stream.resolution}, {stream.quality}, {stream.audioTags}, {stream.size},
+// {stream.encode}, {stream.visualTags}, etc. We extract these from the
+// stream's name + description + filename using regexes, and fill in
+// sensible defaults when info isn't available.
+// ---------------------------------------------------------------------------
+
+function extractStreamData(s, title, addonName) {
+  const name = s.name || '';
+  const desc = s.description || '';
+  const filename = s.behaviorHints?.filename || s.filename || '';
+  const text = `${name} ${desc} ${filename}`;
+  const textLower = text.toLowerCase();
+
+  // Resolution
+  let resolution = 'Unknown';
+  if (/2160p|4k|uhd/i.test(text)) resolution = '2160p';
+  else if (/1440p|2k/i.test(text)) resolution = '1440p';
+  else if (/1080p|fhd/i.test(text)) resolution = '1080p';
+  else if (/720p|hd/i.test(text)) resolution = '720p';
+  else if (/576p/i.test(text)) resolution = '576p';
+  else if (/480p|sd/i.test(text)) resolution = '480p';
+  else if (/360p/i.test(text)) resolution = '360p';
+  else if (/240p/i.test(text)) resolution = '240p';
+  else if (/144p/i.test(text)) resolution = '144p';
+
+  // Quality (source type)
+  let quality = 'Unknown';
+  const qualityMap = [
+    ['BluRay REMUX', /bluray.?remux|remux.?bluray/i],
+    ['HC HD-Rip', /hc.?hd.?rip/i],
+    ['BluRay', /bluray|blu.?ray/i],
+    ['WEB-DL', /web.?dl/i],
+    ['WEBRip', /webrip|web.?rip/i],
+    ['DVDRip', /dvdrip|dvd.?rip/i],
+    ['HDRip', /hdrip|hd.?rip/i],
+    ['HDTV', /hdtv/i],
+    ['SCR', /scr|screener/i],
+    ['CAM', /\bcam\b/i],
+    ['TC', /\btc\b|telecine/i],
+    ['TS', /\bts\b|telesync/i],
+  ];
+  for (const [q, re] of qualityMap) {
+    if (re.test(text)) { quality = q; break; }
+  }
+
+  // Encode (codec)
+  let encode = 'Unknown';
+  if (/hevc|x265|h\.?265/i.test(text)) encode = 'HEVC';
+  else if (/av1/i.test(text)) encode = 'AV1';
+  else if (/avc|x264|h\.?264/i.test(text)) encode = 'AVC';
+  else if (/xvid/i.test(text)) encode = 'XviD';
+  else if (/divx/i.test(text)) encode = 'DivX';
+
+  // Audio tags
+  const audioTags = [];
+  if (/atmos/i.test(text)) audioTags.push('Atmos');
+  if (/truehd/i.test(text)) audioTags.push('TrueHD');
+  if (/dts-?hd.?ma/i.test(text)) audioTags.push('DTS-HD MA');
+  else if (/dts-?hd/i.test(text)) audioTags.push('DTS-HD');
+  if (/dts-?es/i.test(text)) audioTags.push('DTS-ES');
+  if (/dts:x/i.test(text)) audioTags.push('DTS:X');
+  if (/ddp|dd\+|e-?ac-?3/i.test(text)) audioTags.push('DD+');
+  if (/flac/i.test(text)) audioTags.push('FLAC');
+  if (/opus/i.test(text)) audioTags.push('OPUS');
+  if (/\bdts\b/i.test(text)) audioTags.push('DTS');
+  if (/\baac\b/i.test(text)) audioTags.push('AAC');
+  if (/\bdd\b|ac-?3/i.test(text)) audioTags.push('DD');
+
+  // Audio channels
+  const audioChannels = [];
+  const chMatch = text.match(/(\d\.\d)\s*(?:ch|channels?|audio)?/i);
+  if (chMatch) audioChannels.push(chMatch[1]);
+  else if (/7\.1/i.test(text)) audioChannels.push('7.1');
+  else if (/6\.1/i.test(text)) audioChannels.push('6.1');
+  else if (/5\.1/i.test(text)) audioChannels.push('5.1');
+  else if (/2\.0|stereo/i.test(text)) audioChannels.push('2.0');
+
+  // Visual tags
+  const visualTags = [];
+  if (/hdr10\+/i.test(text)) visualTags.push('HDR10+');
+  else if (/hdr10/i.test(text)) visualTags.push('HDR10');
+  if (/dolby.?vision|\bdv\b/i.test(text)) visualTags.push('DV');
+  if (/hdr/i.test(text) && !visualTags.some(v => v.startsWith('HDR'))) visualTags.push('HDR');
+  if (/10.?bit|10bit/i.test(text)) visualTags.push('10bit');
+  if (/hlg/i.test(text)) visualTags.push('HLG');
+  if (/sdr/i.test(text)) visualTags.push('SDR');
+  if (/imax/i.test(text)) visualTags.push('IMAX');
+  if (/3d/i.test(text)) visualTags.push('3D');
+
+  // Size (bytes) — convert from string like "2.5 GB" to bytes
+  let size = 0;
+  const sizeMatch = text.match(/([\d.]+)\s*(TB|GB|MB|KB)/i);
+  if (sizeMatch) {
+    const num = parseFloat(sizeMatch[1]);
+    const unit = sizeMatch[2].toUpperCase();
+    if (unit === 'TB') size = num * 1024 * 1024 * 1024 * 1024;
+    else if (unit === 'GB') size = num * 1024 * 1024 * 1024;
+    else if (unit === 'MB') size = num * 1024 * 1024;
+    else if (unit === 'KB') size = num * 1024;
+  }
+
+  // Bitrate (bps) — from "X Mbps" or "X Kbps"
+  let bitrate = 0;
+  const brMatch = text.match(/([\d.]+)\s*(mbps|kbps|mb\/s|kb\/s)/i);
+  if (brMatch) {
+    const num = parseFloat(brMatch[1]);
+    const unit = brMatch[2].toLowerCase();
+    if (unit.startsWith('mb')) bitrate = num * 1000000;
+    else if (unit.startsWith('kb')) bitrate = num * 1000;
+  }
+
+  // Duration (seconds)
+  let duration = 0;
+  const durMatch = text.match(/(\d+)\s*h\s*(\d+)\s*m/i);
+  if (durMatch) duration = parseInt(durMatch[1]) * 3600 + parseInt(durMatch[2]) * 60;
+  else {
+    const durMin = text.match(/(\d+)\s*min/i);
+    if (durMin) duration = parseInt(durMin[1]) * 60;
+  }
+
+  // Seeders (for p2p streams)
+  let seeders = 0;
+  const seedMatch = text.match(/(\d+)\s*seeders?|seeders?:\s*(\d+)/i);
+  if (seedMatch) seeders = parseInt(seedMatch[1] || seedMatch[2]);
+
+  // Type (debrid / p2p / http / etc.) — inferred from stream source
+  let type = 'http';
+  if (s.behaviorHints?.proxyHeaders || s.behaviorHints?.isSd) type = 'http';
+  if (/debrid|realdebrid|premiumize|alldebrid/i.test(text)) type = 'debrid';
+  else if (/p2p|torrent|magnet/i.test(text)) type = 'p2p';
+  else if (s.sourceSlug && /p2p|torrent|nyaa|eztv|rarbg|1337x|tpb/i.test(s.sourceSlug)) type = 'p2p';
+
+  // Release group (from filename pattern "Title.YEAR.RES.SOURCE.CODEC-GROUP.mkv")
+  let releaseGroup = '';
+  const rgMatch = filename.match(/-([a-z0-9]+)\.(?:mkv|mp4|avi)$/i);
+  if (rgMatch) releaseGroup = rgMatch[1];
+  else {
+    const rgMatch2 = name.match(/-([a-z0-9]+)$/i);
+    if (rgMatch2) releaseGroup = rgMatch2[1];
+  }
+
+  // Network (streaming service) — from filename keywords
+  let network = '';
+  const netMap = [
+    ['AMZN', /amzn|amazon/i, 'Amazon Prime'],
+    ['NF', /netflix|\bnf\b/i, 'Netflix'],
+    ['HULU', /hulu/i, 'Hulu'],
+    ['HBO', /hbo/i, 'HBO'],
+    ['PMTP', /paramount|pmtp/i, 'Paramount'],
+    ['PCOK', /peacock|pcok/i, 'Peacock'],
+    ['DSNP', /disney|dsnp/i, 'Disney'],
+    ['ATVP', /apple.?tv|atvp/i, 'Apple TV'],
+    ['CR', /crunchyroll|\bcr\b/i, 'Crunchyroll'],
+    ['MAX', /\bmax\b/i, 'Max'],
+  ];
+  for (const [, re, label] of netMap) {
+    if (re.test(text)) { network = label; break; }
+  }
+
+  // Edition
+  let edition = '';
+  const editionsList = ['Uncut', 'Extended', 'Theatrical', 'Director', 'Criterion', 'Remaster', 'IMAX'];
+  for (const e of editionsList) {
+    if (new RegExp(e, 'i').test(text)) { edition = e; break; }
+  }
+
+  // Title (from meta or fallback to stream name)
+  const streamTitle = title || name.replace(/\[.*?\]|\(.*?\)/g, '').trim() || '';
+
+  // Source / provider
+  const source = s.sourceSlug || s.source || 'HerumHai';
+  const provider = (s.sourceSlug || 'HerumHai').toUpperCase();
+
+  // Build the data object expected by the template engine.
+  // Mirrors the MOCK_DATA shape in index.html so the same template
+  // produces consistent output in the WebUI preview and in real streams.
+  return {
+    stream: {
+      library: false,
+      resolution,
+      quality,
+      type,
+      nSeScore: 0,
+      seadexBest: false,
+      seadex: false,
+      seeders,
+      audioTags,
+      visualTags,
+      filename,
+      encode,
+      audioChannels,
+      title: streamTitle,
+      year: '',
+      source,
+      seasonEpisode: [],
+      duration,
+      uLanguageEmojis: false,
+      uSubtitleEmojis: false,
+      dubbed: false,
+      size,
+      folderSize: 0,
+      bitrate,
+      message: '',
+      age: '',
+      releaseGroup,
+      indexer: '',
+      provider,
+      uSmallLanguageCodes: [],
+      uSmallSubtitleCodes: [],
+      rankedRegexMatched: '',
+      rseMatched: '',
+      regexMatched: '',
+      network,
+      editions: edition ? [edition] : [],
+      edition,
+      uncensored: false,
+      repack: false,
+      regraded: false,
+      unrated: false,
+      upscaled: false,
+      private: false,
+      freeleech: false,
+    },
+    service: {
+      cached: false,
+      shortName: '',
+    },
+    metadata: {
+      episodeRuntime: 0,
+      runtime: 0,
+    },
+    addon: {
+      name: addonName || 'HerumHai',
+    },
+  };
+}
+
 function formatStreams(streams, userConfig, title) {
   const nameTpl = userConfig.nameTemplate;
   const descTpl = userConfig.descriptionTemplate;
   if (!nameTpl && !descTpl) return streams;
 
-  // Extract stream info from name/description
-  function extractInfo(s) {
-    const text = (s.name || '') + ' ' + (s.description || '') + ' ' + (s.behaviorHints?.filename || '');
-    const resolution = (text.match(/2160p|4k/i) ? '2160p' :
-                       text.match(/1440p|2k/i) ? '1440p' :
-                       text.match(/1080p/i) ? '1080p' :
-                       text.match(/720p/i) ? '720p' :
-                       text.match(/480p/i) ? '480p' :
-                       text.match(/360p/i) ? '360p' : 'Auto');
-    const source = (s.sourceSlug || 'HerumHai');
-    const sizeMatch = text.match(/([\d.]+)\s*(GB|MB|TB)/i);
-    const size = sizeMatch ? sizeMatch[0] : 'Unknown';
-    const provider = source;
-    const year = ''; // Not available in stream data
-    return { resolution, source, size, provider, year, title: title || '' };
-  }
-
-  // Simple template replacement
-  function applyTemplate(tpl, info) {
-    if (!tpl) return null;
-    return tpl
-      .replace(/\{stream\.title\}/g, info.title)
-      .replace(/\{stream\.year\}/g, info.year)
-      .replace(/\{stream\.resolution\}/g, info.resolution)
-      .replace(/\{stream\.source\}/g, info.source)
-      .replace(/\{stream\.size\}/g, info.size)
-      .replace(/\{stream\.provider\}/g, info.provider);
-  }
+  const addonName = 'HerumHai';
 
   return streams.map(s => {
-    const info = extractInfo(s);
-    const newName = applyTemplate(nameTpl, info);
-    const newDesc = applyTemplate(descTpl, info);
-    return {
-      ...s,
-      ...(newName ? { name: newName } : {}),
-      ...(newDesc ? { description: newDesc } : {}),
-    };
+    const data = extractStreamData(s, title, addonName);
+    let newName = s.name;
+    let newDesc = s.description;
+    try {
+      if (nameTpl) newName = evaluateTemplate(nameTpl, data) || s.name;
+    } catch (e) {
+      console.error('[formatter] nameTemplate error:', e.message);
+    }
+    try {
+      if (descTpl) newDesc = evaluateTemplate(descTpl, data) || s.description;
+    } catch (e) {
+      console.error('[formatter] descriptionTemplate error:', e.message);
+    }
+    return { ...s, name: newName, description: newDesc };
   });
 }
 
