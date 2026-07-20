@@ -33,12 +33,6 @@ async function getBrowser() {
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
       '--disable-gpu',
-      '--single-process',
-      '--no-first-run',
-      '--no-zygote',
-      '--single-process',
-      '--no-first-run',
-      '--no-zygote',
       '--disable-blink-features=AutomationControlled',
       '--disable-features=IsolateOrigins,site-per-process',
     ],
@@ -74,16 +68,6 @@ export async function scrapeVAPlayer(title, imdbId, type = 'movie', season = nul
 
   const browser = await getBrowser();
   const page = await browser.newPage();
-    
-    // Block heavy assets to save memory (HidenCloud optimization)
-    await page.setRequestInterception(true);
-    page.on('request', (req) => {
-      if (['image', 'stylesheet', 'font', 'media'].includes(req.resourceType())) {
-        req.abort();
-      } else {
-        req.continue();
-      }
-    });
   await page.setUserAgent(USER_AGENT);
   await page.setExtraHTTPHeaders({
     'Accept-Language': 'en-US,en;q=0.9',

@@ -1,30 +1,15 @@
 {
-  "name": "herumhai-backend",
+  "name": "herumhai",
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "HerumHai Backend — optimized for HidenCloud 3GB RAM",
+  "description": "HerumHai — Real-time Stremio/Nuvio stream addon optimized for Vercel Serverless Deployment.",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js",
-    "scrape": "node scraper.js",
-    "db:setup": "node -e \"import('pg').then(async pg => { const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL }); const fs = await import('fs'); await pool.query(fs.readFileSync('schema.sql', 'utf-8')); console.log('Schema created'); await pool.end(); })\"",
-    "cron": "node scraper.js --cron"
+    "start": "node server.js"
   },
   "dependencies": {
-    "axios": "^1.7.7",
-    "cheerio": "^1.0.0",
-    "cors": "^2.8.5",
-    "dotenv": "^16.4.5",
-    "express": "^4.21.0",
-    "https-proxy-agent": "^7.0.6",
-    "node-cron": "^3.0.3",
-    "pg": "^8.13.0",
-    "puppeteer": "^22.15.0",
-    "puppeteer-extra": "^3.3.6",
-    "puppeteer-extra-plugin-adblocker": "^2.13.6",
-    "puppeteer-extra-plugin-anonymize-ua": "^2.4.6",
-    "puppeteer-extra-plugin-stealth": "^2.11.2"
+    "@sparticuz/chromium": "^127.0.0",
+    "puppeteer-core": "^23.4.0"
   },
   "engines": {
     "node": ">=20.0.0"

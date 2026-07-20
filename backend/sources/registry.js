@@ -64,7 +64,7 @@ function createHubCloudSource(slug, name, homepage, searchPath, extraDetailPatte
       console.log(`  [${slug}] → ${searchUrl.slice(0, 100)}`);
 
       // ---------- Phase 1: Fetch search page with axios ----------
-      const searchRes = await fetchHtml(searchUrl, { timeout: 10000 });
+      const searchRes = await fetchHtml(searchUrl, { timeout: 5000 });
       if (searchRes.status !== 200 || !searchRes.body) {
         console.log(`  [${slug}] search returned ${searchRes.status}`);
         return [];  // universal source will handle fallback
@@ -108,7 +108,7 @@ function createHubCloudSource(slug, name, homepage, searchPath, extraDetailPatte
           console.log(`  [${slug}] → detail: ${detailUrl.slice(0, 80)}`);
           const detailRes = await fetchHtml(detailUrl, {
             headers: { Referer: searchUrl },
-            timeout: 10000,
+            timeout: 5000,
           });
           if (detailRes.status === 200 && detailRes.body) {
             const detailIds = extractHubCloudIds(detailRes.body);
@@ -154,22 +154,18 @@ function createHubCloudSource(slug, name, homepage, searchPath, extraDetailPatte
         }
       }
 
-      // ---------- Phase 5: Skip slow puppeteer — use universal embed fallback ----------
-      // The puppeteer browser scrape is too slow (20+ seconds per source).
-      // Instead, if no HubCloud IDs found via axios, fall back to universal embed
+      // ---------- Phase 5: Universal embed fallback ----------
+      // If no HubCloud IDs found via axios, fall back to universal embed
       // (xpass.top via curl) which is fast (3-5 seconds) and reliable.
-      // The puppeteer fallback is still available in hubcloud_browser.js for
-      // specific sources that need it, but we don't call it here for speed.
-
+      // This ensures EVERY source returns streams, not just Universal/Streamex.
       if (streams.length === 0 && (target.imdbId || target.kitsuId)) {
-        console.log(`  [${slug}] no HubCloud streams — using universal embed as fallback`);
+        console.log(`  [${slug}] no HubCloud streams — using universal embed fallback`);
         const universalStreams = await scrapeUniversalEmbeds(
           title, target.imdbId,
           target.type === 'anime' ? 'series' : target.type,
           target.season, target.episode, target.kitsuId
         );
-        // Re-label streams with this source's name (not "Universal")
-        // Use a Set to track already-added URLs and avoid duplicates
+        // Re-label streams with this source's name and dedupe by URL
         const existingUrls = new Set(streams.map(s => s.url));
         for (const s of universalStreams) {
           if (!existingUrls.has(s.url)) {
@@ -369,7 +365,7 @@ export const ALL_SOURCES = [
       if (!title) return [];
       const searchUrl = `https://aniwaves.ru/search?keyword=${encodeURIComponent(title)}`;
       console.log(`  [aniwaves] → ${searchUrl.slice(0, 80)}`);
-      const searchRes = await fetchHtml(searchUrl, { timeout: 10000 });
+      const searchRes = await fetchHtml(searchUrl, { timeout: 5000 });
       if (searchRes.status !== 200) return [];
 
       // Find anime detail link
@@ -410,7 +406,7 @@ export const ALL_SOURCES = [
       if (!title) return [];
       const searchUrl = `https://animesuge.cz/search?keyword=${encodeURIComponent(title)}`;
       console.log(`  [animesuge] → ${searchUrl.slice(0, 80)}`);
-      const searchRes = await fetchHtml(searchUrl, { timeout: 10000 });
+      const searchRes = await fetchHtml(searchUrl, { timeout: 5000 });
       if (searchRes.status !== 200) return [];
 
       const detailMatch = searchRes.body.match(/href="(\/(?:anime|watch|series)\/[^"]+)"/i);
