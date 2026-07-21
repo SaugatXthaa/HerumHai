@@ -348,8 +348,19 @@ function evaluateSegment(segment, data) {
     } else if (filterName === "isfalse") {
       currentVal = (currentVal === false || String(currentVal) === "false" || currentVal === undefined || currentVal === null);
     } else if (filterName === "exists") {
+      // `exists` returns true only if the value is present AND truthy.
+      // - For arrays: must have at least 1 item
+      // - For booleans: must be `true` (false means "not present" in our data model)
+      // - For numbers: must be non-zero
+      // - For strings: must be non-empty
+      // This matches the stream.js backend behavior so WebUI preview and
+      // production Stremio output stay in sync.
       if (Array.isArray(currentVal)) {
         currentVal = currentVal.length > 0;
+      } else if (typeof currentVal === 'boolean') {
+        currentVal = currentVal === true;
+      } else if (typeof currentVal === 'number') {
+        currentVal = currentVal !== 0;
       } else {
         currentVal = (currentVal !== undefined && currentVal !== null && currentVal !== "");
       }

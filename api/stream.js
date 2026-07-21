@@ -1740,7 +1740,15 @@ function evaluateSegment(segment, data) {
     } else if (filterName === "isfalse") {
       currentVal = (currentVal === false || String(currentVal) === "false" || currentVal === undefined || currentVal === null);
     } else if (filterName === "exists") {
+      // `exists` returns true only if the value is present AND truthy.
+      // - For arrays: must have at least 1 item
+      // - For booleans: must be `true` (false means "not present" in our data model)
+      // - For strings/numbers: must be non-empty/non-zero
+      // This matches aio-streams behavior where undetected fields are set to
+      // undefined/null (so ::exists correctly returns false).
       if (Array.isArray(currentVal)) currentVal = currentVal.length > 0;
+      else if (typeof currentVal === 'boolean') currentVal = currentVal === true;
+      else if (typeof currentVal === 'number') currentVal = currentVal !== 0;
       else currentVal = (currentVal !== undefined && currentVal !== null && currentVal !== "");
     } else if (filterName === "lower") {
       currentVal = String(currentVal ?? "").toLowerCase();
@@ -1897,21 +1905,29 @@ function extractStreamData(s, title, addonName) {
   const filename = s.behaviorHints?.filename || s.filename || '';
   const text = `${name} ${desc} ${filename}`;
   const textLower = text.toLowerCase();
+  // The "source text" is the cleanest signal — usually the filename has the
+  // richest technical metadata (release group, codec, audio tags, etc.).
+  // We prefer the filename when it exists, falling back to name+desc.
+  const sourceText = filename || text;
 
+  // ---------------------------------------------------------------------------
   // Resolution
-  let resolution = 'Unknown';
-  if (/2160p|4k|uhd/i.test(text)) resolution = '2160p';
-  else if (/1440p|2k/i.test(text)) resolution = '1440p';
-  else if (/1080p|fhd/i.test(text)) resolution = '1080p';
-  else if (/720p|hd/i.test(text)) resolution = '720p';
-  else if (/576p/i.test(text)) resolution = '576p';
-  else if (/480p|sd/i.test(text)) resolution = '480p';
-  else if (/360p/i.test(text)) resolution = '360p';
-  else if (/240p/i.test(text)) resolution = '240p';
-  else if (/144p/i.test(text)) resolution = '144p';
+  // ---------------------------------------------------------------------------
+  let resolution = undefined;
+  if (/2160p|4k|uhd/i.test(sourceText)) resolution = '2160p';
+  else if (/1440p|\b2k\b/i.test(sourceText)) resolution = '1440p';
+  else if (/1080p|fhd/i.test(sourceText)) resolution = '1080p';
+  else if (/720p|\bhd\b/i.test(sourceText)) resolution = '720p';
+  else if (/576p/i.test(sourceText)) resolution = '576p';
+  else if (/480p|\bsd\b/i.test(sourceText)) resolution = '480p';
+  else if (/360p/i.test(sourceText)) resolution = '360p';
+  else if (/240p/i.test(sourceText)) resolution = '240p';
+  else if (/144p/i.test(sourceText)) resolution = '144p';
 
+  // ---------------------------------------------------------------------------
   // Quality (source type)
-  let quality = 'Unknown';
+  // ---------------------------------------------------------------------------
+  let quality = undefined;
   const qualityMap = [
     ['BluRay REMUX', /bluray.?remux|remux.?bluray/i],
     ['HC HD-Rip', /hc.?hd.?rip/i],
@@ -1921,72 +1937,130 @@ function extractStreamData(s, title, addonName) {
     ['DVDRip', /dvdrip|dvd.?rip/i],
     ['HDRip', /hdrip|hd.?rip/i],
     ['HDTV', /hdtv/i],
-    ['SCR', /scr|screener/i],
+    ['SCR', /\bscr\b|screener/i],
     ['CAM', /\bcam\b/i],
     ['TC', /\btc\b|telecine/i],
     ['TS', /\bts\b|telesync/i],
   ];
   for (const [q, re] of qualityMap) {
-    if (re.test(text)) { quality = q; break; }
+    if (re.test(sourceText)) { quality = q; break; }
   }
 
+  // ---------------------------------------------------------------------------
   // Encode (codec)
-  let encode = 'Unknown';
-  if (/hevc|x265|h\.?265/i.test(text)) encode = 'HEVC';
-  else if (/av1/i.test(text)) encode = 'AV1';
-  else if (/avc|x264|h\.?264/i.test(text)) encode = 'AVC';
-  else if (/xvid/i.test(text)) encode = 'XviD';
-  else if (/divx/i.test(text)) encode = 'DivX';
+  // ---------------------------------------------------------------------------
+  let encode = undefined;
+  if (/hevc|x265|h\.?265/i.test(sourceText)) encode = 'HEVC';
+  else if (/av1/i.test(sourceText)) encode = 'AV1';
+  else if (/avc|x264|h\.?264/i.test(sourceText)) encode = 'AVC';
+  else if (/xvid/i.test(sourceText)) encode = 'XviD';
+  else if (/divx/i.test(sourceText)) encode = 'DivX';
+  else if (/vc-?1/i.test(sourceText)) encode = 'VC-1';
 
-  // Audio tags
+  // ---------------------------------------------------------------------------
+  // Audio tags — extract all detected audio formats in canonical order
+  // ---------------------------------------------------------------------------
   const audioTags = [];
-  if (/atmos/i.test(text)) audioTags.push('Atmos');
-  if (/truehd/i.test(text)) audioTags.push('TrueHD');
-  if (/dts-?hd.?ma/i.test(text)) audioTags.push('DTS-HD MA');
-  else if (/dts-?hd/i.test(text)) audioTags.push('DTS-HD');
-  if (/dts-?es/i.test(text)) audioTags.push('DTS-ES');
-  if (/dts:x/i.test(text)) audioTags.push('DTS:X');
-  if (/ddp|dd\+|e-?ac-?3/i.test(text)) audioTags.push('DD+');
-  if (/flac/i.test(text)) audioTags.push('FLAC');
-  if (/opus/i.test(text)) audioTags.push('OPUS');
-  if (/\bdts\b/i.test(text)) audioTags.push('DTS');
-  if (/\baac\b/i.test(text)) audioTags.push('AAC');
-  if (/\bdd\b|ac-?3/i.test(text)) audioTags.push('DD');
+  if (/atmos/i.test(sourceText)) audioTags.push('Atmos');
+  if (/truehd/i.test(sourceText)) audioTags.push('TrueHD');
+  if (/dts-?hd.?ma/i.test(sourceText)) audioTags.push('DTS-HD MA');
+  else if (/dts-?hd/i.test(sourceText)) audioTags.push('DTS-HD');
+  if (/dts-?es/i.test(sourceText)) audioTags.push('DTS-ES');
+  if (/dts[:x]/i.test(sourceText)) audioTags.push('DTS:X');
+  if (/ddp|dd\+|e-?ac-?3/i.test(sourceText)) audioTags.push('DD+');
+  if (/flac/i.test(sourceText)) audioTags.push('FLAC');
+  if (/opus/i.test(sourceText)) audioTags.push('OPUS');
+  if (/\bdts\b/i.test(sourceText)) audioTags.push('DTS');
+  if (/\baac\b/i.test(sourceText)) audioTags.push('AAC');
+  if (/\bdd\b|ac-?3/i.test(sourceText)) audioTags.push('DD');
 
-  // Audio channels
+  // ---------------------------------------------------------------------------
+  // Audio channels — extract ALL distinct channel configs (e.g., 2.0 + 7.1)
+  // Use negative lookbehind/lookahead to avoid matching parts of larger numbers
+  // (e.g., "2023.2160p" should NOT match "3.2" as a channel config).
+  // ---------------------------------------------------------------------------
   const audioChannels = [];
-  const chMatch = text.match(/(\d\.\d)\s*(?:ch|channels?|audio)?/i);
-  if (chMatch) audioChannels.push(chMatch[1]);
-  else if (/7\.1/i.test(text)) audioChannels.push('7.1');
-  else if (/6\.1/i.test(text)) audioChannels.push('6.1');
-  else if (/5\.1/i.test(text)) audioChannels.push('5.1');
-  else if (/2\.0|stereo/i.test(text)) audioChannels.push('2.0');
+  // Match X.Y only when NOT preceded or followed by another digit.
+  // Valid channel configs: 1.0, 2.0, 2.1, 4.0, 4.1, 5.0, 5.1, 6.0, 6.1, 7.0, 7.1, 8.0, 8.1
+  const channelRegex = /(?<!\d)([1-8]\.\d)(?!\d)/g;
+  const channelMatches = sourceText.matchAll(channelRegex);
+  const seenChannels = new Set();
+  // Sort by "specificity" — 7.1 > 5.1 > 2.0 (prefer more channels first)
+  const validChannels = ['7.1', '6.1', '5.1', '4.1', '2.1', '7.0', '6.0', '5.0', '4.0', '2.0', '8.1', '8.0'];
+  for (const m of channelMatches) {
+    const ch = m[1];
+    if (validChannels.includes(ch) && !seenChannels.has(ch)) {
+      seenChannels.add(ch);
+      audioChannels.push(ch);
+    }
+  }
+  // Sort to ensure consistent ordering (higher channel count first)
+  audioChannels.sort((a, b) => parseFloat(b) - parseFloat(a));
 
+  // ---------------------------------------------------------------------------
   // Visual tags
+  // ---------------------------------------------------------------------------
   const visualTags = [];
-  if (/hdr10\+/i.test(text)) visualTags.push('HDR10+');
-  else if (/hdr10/i.test(text)) visualTags.push('HDR10');
-  if (/dolby.?vision|\bdv\b/i.test(text)) visualTags.push('DV');
-  if (/hdr/i.test(text) && !visualTags.some(v => v.startsWith('HDR'))) visualTags.push('HDR');
-  if (/10.?bit|10bit/i.test(text)) visualTags.push('10bit');
-  if (/hlg/i.test(text)) visualTags.push('HLG');
-  if (/sdr/i.test(text)) visualTags.push('SDR');
-  if (/imax/i.test(text)) visualTags.push('IMAX');
-  if (/3d/i.test(text)) visualTags.push('3D');
+  if (/hdr10\+/i.test(sourceText)) visualTags.push('HDR10+');
+  else if (/hdr10/i.test(sourceText)) visualTags.push('HDR10');
+  if (/dolby.?vision|\bdv\b/i.test(sourceText)) visualTags.push('DV');
+  if (/hdr/i.test(sourceText) && !visualTags.some(v => v.startsWith('HDR'))) visualTags.push('HDR');
+  if (/10.?bit|10bit/i.test(sourceText)) visualTags.push('10bit');
+  if (/hlg/i.test(sourceText)) visualTags.push('HLG');
+  if (/sdr/i.test(sourceText)) visualTags.push('SDR');
+  if (/imax/i.test(sourceText)) visualTags.push('IMAX');
+  if (/\b3d\b/i.test(sourceText)) visualTags.push('3D');
+  if (/ai[- ]?upscale/i.test(sourceText)) visualTags.push('AI');
 
+  // ---------------------------------------------------------------------------
   // Size (bytes) — convert from string like "2.5 GB" to bytes
+  // Look in description first (often formatted as "Size: 2.5 GB"), then name
+  // ---------------------------------------------------------------------------
   let size = 0;
-  const sizeMatch = text.match(/([\d.]+)\s*(TB|GB|MB|KB)/i);
-  if (sizeMatch) {
-    const num = parseFloat(sizeMatch[1]);
-    const unit = sizeMatch[2].toUpperCase();
-    if (unit === 'TB') size = num * 1024 * 1024 * 1024 * 1024;
-    else if (unit === 'GB') size = num * 1024 * 1024 * 1024;
-    else if (unit === 'MB') size = num * 1024 * 1024;
-    else if (unit === 'KB') size = num * 1024;
+  // Try patterns like "62.5 GB", "Size: 2.5GB", "💾 1.4 GB"
+  const sizePatterns = [
+    /size[:\s]*([\d.]+)\s*(TB|GB|MB|KB)/i,
+    /💾\s*([\d.]+)\s*(TB|GB|MB|KB)/i,
+    /([\d.]+)\s*(TB|GB|MB|KB)/i,
+  ];
+  for (const re of sizePatterns) {
+    const m = text.match(re);
+    if (m) {
+      const num = parseFloat(m[1]);
+      const unit = m[2].toUpperCase();
+      if (unit === 'TB') size = num * 1024 * 1024 * 1024 * 1024;
+      else if (unit === 'GB') size = num * 1024 * 1024 * 1024;
+      else if (unit === 'MB') size = num * 1024 * 1024;
+      else if (unit === 'KB') size = num * 1024;
+      break;
+    }
   }
 
-  // Bitrate (bps) — from "X Mbps" or "X Kbps"
+  // ---------------------------------------------------------------------------
+  // Folder size (bytes) — for season packs: "[125 GB]" or "/ 125 GB"
+  // ---------------------------------------------------------------------------
+  let folderSize = 0;
+  const folderPatterns = [
+    /\[([\d.]+)\s*(TB|GB|MB|KB)\]/i,
+    /\/\s*([\d.]+)\s*(TB|GB|MB|KB)/i,
+    /folder[:\s]*([\d.]+)\s*(TB|GB|MB|KB)/i,
+  ];
+  for (const re of folderPatterns) {
+    const m = text.match(re);
+    if (m) {
+      const num = parseFloat(m[1]);
+      const unit = m[2].toUpperCase();
+      if (unit === 'TB') folderSize = num * 1024 * 1024 * 1024 * 1024;
+      else if (unit === 'GB') folderSize = num * 1024 * 1024 * 1024;
+      else if (unit === 'MB') folderSize = num * 1024 * 1024;
+      else if (unit === 'KB') folderSize = num * 1024;
+      break;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Bitrate (bps) — from "X Mbps" / "X Kbps" or computed from size+duration
+  // ---------------------------------------------------------------------------
   let bitrate = 0;
   const brMatch = text.match(/([\d.]+)\s*(mbps|kbps|mb\/s|kb\/s)/i);
   if (brMatch) {
@@ -1996,80 +2070,311 @@ function extractStreamData(s, title, addonName) {
     else if (unit.startsWith('kb')) bitrate = num * 1000;
   }
 
-  // Duration (seconds)
+  // ---------------------------------------------------------------------------
+  // Duration (seconds) — from "1h 32m", "62 min", "02:15:30" patterns
+  // ---------------------------------------------------------------------------
   let duration = 0;
-  const durMatch = text.match(/(\d+)\s*h\s*(\d+)\s*m/i);
-  if (durMatch) duration = parseInt(durMatch[1]) * 3600 + parseInt(durMatch[2]) * 60;
-  else {
-    const durMin = text.match(/(\d+)\s*min/i);
+  let episodeRuntime = 0;
+  let runtime = 0;
+  // "1h 32m" or "1h32m" or "1h:32m:0s"
+  const durMatch = text.match(/(\d+)\s*h[\s:]*\d*\s*(\d+)\s*m/i) ||
+                   text.match(/(\d+)\s*h\s*(\d+)\s*m/i);
+  if (durMatch) {
+    duration = parseInt(durMatch[1]) * 3600 + parseInt(durMatch[2]) * 60;
+  } else {
+    // "62 min" or "62m"
+    const durMin = text.match(/(\d+)\s*(?:min|m\b)/i);
     if (durMin) duration = parseInt(durMin[1]) * 60;
   }
+  if (duration > 0) {
+    // If duration is over 4 hours, it's likely a season pack — treat as runtime
+    if (duration > 14400) {
+      runtime = duration;
+    } else {
+      episodeRuntime = duration;
+      runtime = duration;
+    }
+  }
 
+  // If we have size and duration but no bitrate, compute it
+  if (!bitrate && size > 0 && duration > 0) {
+    bitrate = Math.round((size * 8) / duration);
+  }
+
+  // ---------------------------------------------------------------------------
   // Seeders (for p2p streams)
+  // ---------------------------------------------------------------------------
   let seeders = 0;
-  const seedMatch = text.match(/(\d+)\s*seeders?|seeders?:\s*(\d+)/i);
-  if (seedMatch) seeders = parseInt(seedMatch[1] || seedMatch[2]);
+  const seedMatch = text.match(/(\d+)\s*seeders?|seeders?:\s*(\d+)|👥\s*(\d+)|🌱\s*(\d+)/i);
+  if (seedMatch) {
+    seeders = parseInt(seedMatch[1] || seedMatch[2] || seedMatch[3] || seedMatch[4]);
+  }
 
-  // Type (debrid / p2p / http / etc.) — inferred from stream source
+  // ---------------------------------------------------------------------------
+  // Type (debrid / p2p / http / usenet / etc.)
+  // ---------------------------------------------------------------------------
   let type = 'http';
-  if (s.behaviorHints?.proxyHeaders || s.behaviorHints?.isSd) type = 'http';
-  if (/debrid|realdebrid|premiumize|alldebrid/i.test(text)) type = 'debrid';
-  else if (/p2p|torrent|magnet/i.test(text)) type = 'p2p';
+  if (/debrid|real-?debrid|premiumize|alldebrid|torbox/i.test(text)) type = 'debrid';
+  else if (/usenet|nzb/i.test(text)) type = 'usenet';
+  else if (/\bp2p\b|torrent|magnet/i.test(text)) type = 'p2p';
   else if (s.sourceSlug && /p2p|torrent|nyaa|eztv|rarbg|1337x|tpb/i.test(s.sourceSlug)) type = 'p2p';
 
-  // Release group (from filename pattern "Title.YEAR.RES.SOURCE.CODEC-GROUP.mkv")
+  // ---------------------------------------------------------------------------
+  // Release group (from filename pattern "-GROUP.mkv")
+  // ---------------------------------------------------------------------------
   let releaseGroup = '';
-  const rgMatch = filename.match(/-([a-z0-9]+)\.(?:mkv|mp4|avi)$/i);
+  const rgMatch = filename.match(/-([a-z0-9]+)\.(?:mkv|mp4|avi|m4v|mov|wmv|flac|mp3)$/i);
   if (rgMatch) releaseGroup = rgMatch[1];
   else {
     const rgMatch2 = name.match(/-([a-z0-9]+)$/i);
     if (rgMatch2) releaseGroup = rgMatch2[1];
   }
 
-  // Network (streaming service) — from filename keywords
-  let network = '';
+  // ---------------------------------------------------------------------------
+  // Network (streaming service) — from filename keywords like AMZN, NF, etc.
+  // ---------------------------------------------------------------------------
+  let network = undefined;
   const netMap = [
-    ['AMZN', /amzn|amazon/i, 'Amazon Prime'],
-    ['NF', /netflix|\bnf\b/i, 'Netflix'],
-    ['HULU', /hulu/i, 'Hulu'],
-    ['HBO', /hbo/i, 'HBO'],
-    ['PMTP', /paramount|pmtp/i, 'Paramount'],
-    ['PCOK', /peacock|pcok/i, 'Peacock'],
-    ['DSNP', /disney|dsnp/i, 'Disney'],
-    ['ATVP', /apple.?tv|atvp/i, 'Apple TV'],
-    ['CR', /crunchyroll|\bcr\b/i, 'Crunchyroll'],
-    ['MAX', /\bmax\b/i, 'Max'],
+    [/amzn|amazon/i, 'Amazon Prime'],
+    [/netflix|\bnf\b/i, 'Netflix'],
+    [/hulu/i, 'Hulu'],
+    [/hbo/i, 'HBO'],
+    [/paramount|pmtp/i, 'Paramount'],
+    [/peacock|pcok/i, 'Peacock'],
+    [/disney|dsnp/i, 'Disney'],
+    [/apple.?tv|atvp/i, 'Apple TV'],
+    [/crunchyroll|\bcr\b/i, 'Crunchyroll'],
+    [/\bmax\b/i, 'Max'],
+    [/youtube|yt\b/i, 'YouTube'],
+    [/hbomax|hbo.?max/i, 'Max'],
   ];
-  for (const [, re, label] of netMap) {
-    if (re.test(text)) { network = label; break; }
+  for (const [re, label] of netMap) {
+    if (re.test(sourceText)) { network = label; break; }
   }
 
-  // Edition
-  let edition = '';
-  const editionsList = ['Uncut', 'Extended', 'Theatrical', 'Director', 'Criterion', 'Remaster', 'IMAX'];
+  // ---------------------------------------------------------------------------
+  // Edition (Director's Cut, Extended, Uncut, IMAX, etc.)
+  // ---------------------------------------------------------------------------
+  let edition = undefined;
+  const editionsList = [
+    'Director\'s Cut', 'Extended Cut', 'Extended', 'Theatrical',
+    'Criterion', 'Remastered', 'Uncut', 'IMAX', 'Special Edition',
+    'Unrated',
+  ];
   for (const e of editionsList) {
-    if (new RegExp(e, 'i').test(text)) { edition = e; break; }
+    if (new RegExp(e, 'i').test(sourceText)) { edition = e; break; }
+  }
+  const editions = edition ? [edition] : [];
+
+  // ---------------------------------------------------------------------------
+  // Year — parse 4-digit year from filename/name (1900-2099)
+  // ---------------------------------------------------------------------------
+  let year = undefined;
+  const yearMatch = sourceText.match(/\b(19\d{2}|20\d{2})\b/);
+  if (yearMatch) year = yearMatch[1];
+
+  // ---------------------------------------------------------------------------
+  // Season + Episode — parse S01E01 / S04E01 / 1x01 patterns
+  // ---------------------------------------------------------------------------
+  const seasonEpisode = [];
+  const seMatch = sourceText.match(/s(\d{1,2})e(\d{1,3})/i);
+  if (seMatch) {
+    const sNum = parseInt(seMatch[1]);
+    const eNum = parseInt(seMatch[2]);
+    seasonEpisode.push(`S${String(sNum).padStart(2, '0')}`, `E${String(eNum).padStart(2, '0')}`);
+  } else {
+    // Try 1x01 pattern
+    const xMatch = sourceText.match(/(\d{1,2})x(\d{1,3})/);
+    if (xMatch) {
+      const sNum = parseInt(xMatch[1]);
+      const eNum = parseInt(xMatch[2]);
+      seasonEpisode.push(`S${String(sNum).padStart(2, '0')}`, `E${String(eNum).padStart(2, '0')}`);
+    }
   }
 
+  // ---------------------------------------------------------------------------
+  // Languages — detect from filename (EN, HI, JA, etc.) and Dual-Audio keyword
+  // ---------------------------------------------------------------------------
+  const languages = [];
+  const languageEmojis = [];
+  const langMap = [
+    [/\beng\b|\ben\b|\benglish\b/i, 'EN', '🇬🇧'],
+    [/\bhin\b|\bhi\b|\bhindi\b/i, 'HI', '🇮🇳'],
+    [/\bjpn\b|\bja\b|\bjapanese\b/i, 'JA', '🇯🇵'],
+    [/\bkor\b|\bko\b|\bkorean\b/i, 'KO', '🇰🇷'],
+    [/\bchi\b|\bzh\b|\bchinese\b|\bmandarin\b|\bcantonese\b/i, 'ZH', '🇨🇳'],
+    [/\bspa\b|\bes\b|\bspanish\b/i, 'ES', '🇪🇸'],
+    [/\bfra\b|\bfr\b|\bfrench\b/i, 'FR', '🇫🇷'],
+    [/\bdeu\b|\bde\b|\bgerman\b/i, 'DE', '🇩🇪'],
+    [/\bita\b|\bit\b|\bitalian\b/i, 'IT', '🇮🇹'],
+    [/\bpor\b|\bpt\b|\bportuguese\b/i, 'PT', '🇵🇹'],
+    [/\brus\b|\bru\b|\brussian\b/i, 'RU', '🇷🇺'],
+    [/\btam\b|\bta\b|\btamil\b/i, 'TA', '🇮🇳'],
+    [/\btel\b|\bte\b|\btelugu\b/i, 'TE', '🇮🇳'],
+    [/\bkan\b|\bkn\b|\bkannada\b/i, 'KN', '🇮🇳'],
+    [/\bmal\b|\bml\b|\bmalayalam\b/i, 'ML', '🇮🇳'],
+    [/\bben\b|\bbn\b|\bbengali\b/i, 'BN', '🇧🇩'],
+    [/\bpol\b|\bpl\b|\bpolish\b/i, 'PL', '🇵🇷'],
+    [/\bnld\b|\bnl\b|\bdutch\b/i, 'NL', '🇳🇱'],
+    [/\btha\b|\bth\b|\bthai\b/i, 'TH', '🇹🇭'],
+    [/\bind\b|\bid\b|\bindonesian\b/i, 'ID', '🇮🇩'],
+    [/\btur\b|\btr\b|\bturkish\b/i, 'TR', '🇹🇷'],
+    [/\bara\b|\bar\b|\barabic\b/i, 'AR', '🇸🇦'],
+    [/\bheb\b|\bhe\b|\bhebrew\b/i, 'HE', '🇮🇱'],
+    [/\bukr\b|\buk\b|\bukrainian\b/i, 'UK', '🇺🇦'],
+  ];
+  for (const [re, code, emoji] of langMap) {
+    if (re.test(sourceText)) {
+      languages.push(code);
+      languageEmojis.push(emoji);
+    }
+  }
+  // Detect "Dual Audio" / "Multi Audio"
+  const isDualAudio = /dual[\s.-]*audio|multi[\s.-]*audio/i.test(sourceText);
+
+  // ---------------------------------------------------------------------------
+  // Subtitles — detect from filename
+  // ---------------------------------------------------------------------------
+  const subtitles = [];
+  const subtitleEmojis = [];
+  const subMatch = sourceText.match(/subs?\s*:?\s*([a-z]{2,3}(?:\s*,\s*[a-z]{2,3})*)/i);
+  if (subMatch) {
+    const codes = subMatch[1].split(/[, ]+/).filter(Boolean);
+    for (const c of codes) {
+      const upper = c.toUpperCase();
+      // Find matching emoji from langMap
+      const found = langMap.find(([re]) => re.test(upper));
+      if (found) {
+        subtitles.push(upper);
+        subtitleEmojis.push(found[2]);
+      }
+    }
+  }
+  // Subbed keyword
+  const isSubbed = /\bsubbed\b|\bsubs?\b/i.test(sourceText) || subtitles.length > 0;
+
+  // ---------------------------------------------------------------------------
+  // nSeScore (0-100) — parse "X%" or "score: X" from description
+  // ---------------------------------------------------------------------------
+  let nSeScore = 0;
+  const scoreMatch = text.match(/(\d{1,3})\s*%/);
+  if (scoreMatch) {
+    nSeScore = parseInt(scoreMatch[1]);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Age (how old the release is) — "1d", "10d", "2w", "3 months"
+  // ---------------------------------------------------------------------------
+  let age = undefined;
+  const ageMatch = text.match(/\b(\d+)\s*(s|min|h|d|w|mo|y)\b/i);
+  if (ageMatch) {
+    age = ageMatch[0];
+  } else {
+    const ageMatch2 = text.match(/age[:\s]*([\d.\w]+)/i);
+    if (ageMatch2) age = ageMatch2[1];
+  }
+
+  // ---------------------------------------------------------------------------
+  // Indexer — for torrents/usenet (rarbg, eztv, nyaa, etc.)
+  // ---------------------------------------------------------------------------
+  let indexer = undefined;
+  const indexerMap = [
+    [/rarbg/i, 'RARBG'],
+    [/\beztv\b/i, 'EZTV'],
+    [/\bnyaa\b/i, 'Nyaa'],
+    [/\b1337x\b/i, '1337x'],
+    [/\btpb\b|pirate.?bay/i, 'TPB'],
+    [/yts/i, 'YTS'],
+    [/torrentio/i, 'Torrentio'],
+    [/pengu/i, 'PenguPlay'],
+    [/hdhub/i, 'HDHub'],
+  ];
+  for (const [re, label] of indexerMap) {
+    if (re.test(text)) { indexer = label; break; }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Message — any extra info in description (e.g., "NZB Health: ✅")
+  // ---------------------------------------------------------------------------
+  let message = undefined;
+  const msgMatch = desc.match(/(?:message|info|note)[:\s]+([^\n|]+)/i);
+  if (msgMatch) {
+    message = msgMatch[1].trim().substring(0, 100);
+  } else if (/NZB Health:/i.test(desc)) {
+    const nzbMatch = desc.match(/NZB Health:\s*[^\n|]+/i);
+    if (nzbMatch) message = nzbMatch[0];
+  }
+
+  // ---------------------------------------------------------------------------
+  // Service info — derive from source slug / stream type
+  // ---------------------------------------------------------------------------
+  const sourceSlug = s.sourceSlug || s.source || 'HerumHai';
+  // Map common source slugs to short display names
+  const shortNameMap = {
+    'universal': 'Universal',
+    'streamex': 'StreameX',
+    'nebula': 'Nebula',
+    '4khdhub': '4KHDHub',
+    '4khdhub_one': '4KHDHub.one',
+    'animesky': 'AnimeSky',
+    'movieseq': 'MoviesEQ',
+    'cinewave': 'CineWave',
+    'tatvamovies': 'TatvaMovies',
+    'cinefreak': 'CineFreak',
+    'moviebox': 'MovieBox',
+    'mkvbase': 'MKVBase',
+    'moviesdrives': 'MoviesDrives',
+    'vaplayer': 'VAPlayer',
+    'videasy': 'Videasy',
+    'aether': 'Aether',
+    'hdghartv': 'HDGharTV',
+    '111477': '111477',
+    'filmhds': 'FilmHDS',
+    'hdhub4u': 'HDHub4u',
+    'uhdmovies': 'UHDMovies',
+    'moviescounter': 'MoviesCounter',
+    'vidsrc': 'VidSrc',
+    '2embed': '2Embed',
+  };
+  const serviceShortName = shortNameMap[sourceSlug] || sourceSlug;
+  // Service is "cached" if it's a debrid/cached source
+  const isCached = type === 'debrid' || /cached|instant/i.test(text);
+
+  // ---------------------------------------------------------------------------
   // Title (from meta or fallback to stream name)
+  // ---------------------------------------------------------------------------
   const streamTitle = title || name.replace(/\[.*?\]|\(.*?\)/g, '').trim() || '';
 
-  // Source / provider
-  const source = s.sourceSlug || s.source || 'HerumHai';
-  const provider = (s.sourceSlug || 'HerumHai').toUpperCase();
+  // Provider (uppercase source name)
+  const provider = sourceSlug.toUpperCase();
 
+  // ---------------------------------------------------------------------------
+  // Misc boolean flags — use `undefined` when not detected so ::exists returns
+  // false correctly. (Setting `false` makes ::exists return TRUE because
+  // false is not undefined/null/"".)
+  // ---------------------------------------------------------------------------
+  const isRepack = /repack/i.test(sourceText) ? true : undefined;
+  const isUncensored = /uncensored/i.test(sourceText) ? true : undefined;
+  const isRegraded = /regraded/i.test(sourceText) ? true : undefined;
+  const isUnrated = /\bunrated\b/i.test(sourceText) ? true : undefined;
+  const isUpscaled = /upscale/i.test(sourceText) ? true : undefined;
+  const isPrivate = /\bprivate\b/i.test(sourceText) ? true : undefined;
+  const isFreeleech = /freeleech/i.test(sourceText) ? true : undefined;
+
+  // ---------------------------------------------------------------------------
   // Build the data object expected by the template engine.
-  // Mirrors the MOCK_DATA shape in index.html so the same template
-  // produces consistent output in the WebUI preview and in real streams.
+  // Mirrors the MOCK_DATA shape in index.html so the same template produces
+  // consistent output in the WebUI preview and in real streams.
+  // ---------------------------------------------------------------------------
   return {
     stream: {
-      library: false,
+      library: false, // always false for non-user-library streams
       resolution,
       quality,
       type,
-      nSeScore: 0,
-      seadexBest: false,
-      seadex: false,
+      nSeScore,
+      seadexBest: undefined,
+      seadex: undefined,
       seeders,
       audioTags,
       visualTags,
@@ -2077,44 +2382,53 @@ function extractStreamData(s, title, addonName) {
       encode,
       audioChannels,
       title: streamTitle,
-      year: '',
-      source,
-      seasonEpisode: [],
+      year,
+      source: sourceSlug,
+      seasonEpisode,
       duration,
-      uLanguageEmojis: false,
-      uSubtitleEmojis: false,
-      dubbed: false,
+      uLanguageEmojis: languageEmojis.length > 0 ? languageEmojis : undefined,
+      uSubtitleEmojis: subtitleEmojis.length > 0 ? subtitleEmojis : undefined,
+      dubbed: isDualAudio ? true : undefined,
+      subbed: isSubbed ? true : undefined,
+      uLanguages: languages.length > 0 ? languages : undefined,
+      uSubtitles: subtitles.length > 0 ? subtitles : undefined,
+      uSmallLanguageCodes: languages,
+      uSmallSubtitleCodes: subtitles,
+      languages: languages.length > 0 ? languages : undefined,
+      subtitles: subtitles.length > 0 ? subtitles : undefined,
+      languageEmojis: languageEmojis.length > 0 ? languageEmojis : undefined,
+      subtitleEmojis: subtitleEmojis.length > 0 ? subtitleEmojis : undefined,
       size,
-      folderSize: 0,
+      folderSize,
       bitrate,
-      message: '',
-      age: '',
+      message,
+      age,
       releaseGroup,
-      indexer: '',
+      indexer,
       provider,
-      uSmallLanguageCodes: [],
-      uSmallSubtitleCodes: [],
-      rankedRegexMatched: '',
-      rseMatched: '',
-      regexMatched: '',
+      rankedRegexMatched: undefined,
+      rseMatched: undefined,
+      regexMatched: undefined,
       network,
-      editions: edition ? [edition] : [],
+      editions,
       edition,
-      uncensored: false,
-      repack: false,
-      regraded: false,
-      unrated: false,
-      upscaled: false,
-      private: false,
-      freeleech: false,
+      uncensored: isUncensored,
+      repack: isRepack,
+      regraded: isRegraded,
+      unrated: isUnrated,
+      upscaled: isUpscaled,
+      private: isPrivate,
+      freeleech: isFreeleech,
+      proxied: true, // we always proxy streams
     },
     service: {
-      cached: false,
-      shortName: '',
+      cached: isCached,
+      shortName: serviceShortName,
+      id: sourceSlug,
     },
     metadata: {
-      episodeRuntime: 0,
-      runtime: 0,
+      episodeRuntime,
+      runtime,
     },
     addon: {
       name: addonName || 'HerumHai',
