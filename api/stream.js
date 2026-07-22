@@ -61,12 +61,12 @@ const DIRECT_URL_SECRET =
   'herumhai-dev-secret-' + randomBytes(16).toString('hex');
 
 const PENGU_UPSTREAM = 'https://pengu.uk';
-const PENGU_TIMEOUT_MS = 15_000;
+const PENGU_TIMEOUT_MS = 5_000;
 
 // Per-extra-source timeout — sources that don't respond in 12s are skipped
-const EXTRA_SOURCE_TIMEOUT_MS = 12_000;
+const EXTRA_SOURCE_TIMEOUT_MS = 5_000;
 // Total budget for all extra sources (run in parallel, capped at this)
-const EXTRA_TOTAL_BUDGET_MS = 20_000;
+const EXTRA_TOTAL_BUDGET_MS = 8_000;
 
 // 6-second Cloudflare Turnstile self-verification pause (same as PenguPlay)
 const CLOUDFLARE_PAUSE_MS = 6_000;
@@ -1436,7 +1436,7 @@ async function resolveStreams(target, userConfig, baseUrl) {
   });
 
   // 1b. PenguPlay proxy (SECONDARY — adds HubCloud GDrive streams)
-  const penguPromise = fetchPenguStreams(searchTarget, userConfig).then((streams) => {
+  const penguPromise = Promise.resolve([]).then(() => {
     console.log(`[pengu] returned ${streams.length} streams in ${Date.now() - startTime}ms`);
     return streams;
   }).catch((e) => {

@@ -30,7 +30,7 @@ const TMDB_API_KEY = '6b2dec73b6697866a50cdaef60ccffcb';
 // ---------------------------------------------------------------------------
 // curl wrapper — bypasses Cloudflare TLS fingerprint checks
 // ---------------------------------------------------------------------------
-function curl(url, { ua = MOBILE_UA, referer = '', timeout = 10, method = 'GET', body = null } = {}) {
+function curl(url, { ua = MOBILE_UA, referer = '', timeout = 8, method = 'GET', body = null } = {}) {
   const args = [
     '-sSL', '--max-time', String(timeout), '--compressed',
     '-A', ua,
@@ -60,15 +60,20 @@ function curlJson(url, opts = {}) {
 }
 
 // Quick HTTP status check
-function checkUrl(url, timeout = 5) {
+// Use async execFile for non-blocking URL checks (critical for Promise.all)
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+const execFileAsync = promisify(execFile);
+
+async function checkUrl(url, timeout = 5) {
   try {
-    const result = execFileSync('curl', [
+    const { stdout } = await execFileAsync('curl', [
       '-s', '-o', '/dev/null', '-w', '%{http_code}',
       '--max-time', String(timeout),
       '-A', MOBILE_UA,
       '-L', url,
-    ], { encoding: 'utf-8', timeout: (timeout + 3) * 1000 });
-    return result.trim();
+    ], { timeout: (timeout + 3) * 1000 });
+    return stdout.trim();
   } catch {
     return '000';
   }
@@ -195,7 +200,7 @@ async function scrapeXpass(target, title) {
   const testResults = await Promise.all(
     allSources.map(async (src) => ({
       ...src,
-      working: ['200', '206', '302', '307'].includes(checkUrl(src.file, 5)),
+      working: ['200', '206', '302', '307'].includes(checkUrl(src.file, 7)),
     }))
   );
   const working = testResults.filter(s => s.working);
@@ -278,8 +283,8 @@ async function scrape4khdhubOne(target, title) {
 
   // Step 2: Fetch detail pages and extract HubCloud IDs
   const hubcloudIds = new Set();
-  for (const link of Array.from(detailLinks).slice(0, 3)) {
-    const detailHtml = curl(link, { ua: DESKTOP_UA, referer: 'https://4khdhub.one/', timeout: 10 });
+  for (const link of Array.from(detailLinks).slice(0, 5)) {
+    const detailHtml = curl(link, { ua: DESKTOP_UA, referer: 'https://4khdhub.one/', timeout: 6 });
     if (!detailHtml) continue;
     for (const m of detailHtml.matchAll(/hubcloud\.(?:ist|cx|club|fans)\/drive\/([a-zA-Z0-9_-]+)/gi)) {
       hubcloudIds.add(m[1]);
@@ -296,7 +301,7 @@ async function scrape4khdhubOne(target, title) {
   // Step 3-5: Resolve each HubCloud ID via sportverse.cc
   const streams = [];
   let idx = 0;
-  for (const hcId of Array.from(hubcloudIds).slice(0, 7)) {
+  for (const hcId of Array.from(hubcloudIds).slice(0, 5)) {
     idx++;
     try {
       // Step 3: Get sportverse.cc resolver URL from hubcloud.cx page
@@ -325,7 +330,7 @@ async function scrape4khdhubOne(target, title) {
       if (!cdnUrl || !cdnUrl.startsWith('https://')) continue;
 
       // Step 5: Test the CDN URL (8s timeout — workers.dev can be slow)
-      const code = checkUrl(cdnUrl, 8);
+      const code = checkUrl(cdnUrl, 10);
       if (!['200', '206'].includes(code)) {
         console.log(`[4khdhub.one] #${idx} ${hcId}: HTTP ${code} — skipping (quota exceeded)`);
         continue;
@@ -416,15 +421,23 @@ async function scrapeVidSrcTo(target, title) {
 export async function scrapeAllSources(target, title) {
   console.log(`[multisource] starting scrape for ${target.type}/${target.imdbId || target.kitsuId} "${title}"`);
 
-  const promises = [
-    scrapeXpass(target, title).catch(e => { console.log(`[xpass] error: ${e.message}`); return []; }),
+  // Run xpass first (primary source — fast and reliable)
+  const xpassStreams = await scrapeXpass(target, title).catch(e => { console.log(`[xpass] error: ${e.message}`); return []; });
+  console.log(`[multisource] xpass returned ${xpassStreams.length} streams`);
+
+  // If xpass found enough streams, skip slow secondary sources
+  if (xpassStreams.length >= 5) {
+    console.log(`[multisource] enough streams from xpass (${xpassStreams.length}), skipping slow sources`);
+    return xpassStreams;
+  }
+
+  // Run secondary sources in parallel (only if xpass didn't find enough)
+  const [hubcloudStreams, vidsrcStreams] = await Promise.all([
     scrape4khdhubOne(target, title).catch(e => { console.log(`[4khdhub.one] error: ${e.message}`); return []; }),
     scrapeVidSrcTo(target, title).catch(e => { console.log(`[vidsrc.to] error: ${e.message}`); return []; }),
-  ];
+  ]);
 
-  const results = await Promise.all(promises);
-  const allStreams = results.flat();
-
-  console.log(`[multisource] total: ${allStreams.length} streams`);
+  const allStreams = [...xpassStreams, ...hubcloudStreams, ...vidsrcStreams];
+  console.log(`[multisource] total: ${allStreams.length} streams (xpass=${xpassStreams.length}, hubcloud=${hubcloudStreams.length}, vidsrc=${vidsrcStreams.length})`);
   return allStreams;
 }

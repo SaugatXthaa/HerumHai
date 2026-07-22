@@ -48,7 +48,7 @@ const DIRECT_URL_SECRET =
   'herumhai-dev-secret-' + randomBytes(16).toString('hex');
 
 const HDHUB_UPSTREAM = 'https://hdhub.thevolecitor.qzz.io';
-const HDHUB_TIMEOUT_MS = 20_000;
+const HDHUB_TIMEOUT_MS = 5_000;
 
 const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
