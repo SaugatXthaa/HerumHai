@@ -50,7 +50,7 @@ import {
 
 // Import multi-source HTTP scraper (xpass + 4khdhub.one + vidsrc.to)
 import { scrapeAllSources } from './multisource.js';
-import { evaluateTemplate, formatStream, convertStreamToParseValue } from './formatter-engine.js';
+import { evaluateTemplate, BUILTIN_FORMATTER_DEFINITIONS } from './formatter-engine.js';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -2338,11 +2338,10 @@ let DEFAULT_DESC_TEMPLATE = null;
 async function loadDefaultFormatter() {
   if (DEFAULT_NAME_TEMPLATE) return;
   try {
-    // Import BUILTIN_FORMATTER_DEFINITIONS from the engine (bundled from AIOStreams source)
-    const engine = await import('./formatter-engine.js');
-    if (engine.BUILTIN_FORMATTER_DEFINITIONS?.tamtaro) {
-      DEFAULT_NAME_TEMPLATE = engine.BUILTIN_FORMATTER_DEFINITIONS.tamtaro.name;
-      DEFAULT_DESC_TEMPLATE = engine.BUILTIN_FORMATTER_DEFINITIONS.tamtaro.description;
+    // Use BUILTIN_FORMATTER_DEFINITIONS from the static import (already loaded)
+    if (BUILTIN_FORMATTER_DEFINITIONS?.tamtaro) {
+      DEFAULT_NAME_TEMPLATE = BUILTIN_FORMATTER_DEFINITIONS.tamtaro.name;
+      DEFAULT_DESC_TEMPLATE = BUILTIN_FORMATTER_DEFINITIONS.tamtaro.description;
       console.log(`[formatter] loaded Tamtaro default from AIOStreams engine (name=${DEFAULT_NAME_TEMPLATE?.length||0} chars)`);
     }
   } catch (e) {
