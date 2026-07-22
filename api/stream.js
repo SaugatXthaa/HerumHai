@@ -50,6 +50,8 @@ import {
 
 // Import xpass.top HTTP scraper (works on Vercel without puppeteer/browser)
 import { scrapeXpass } from './xpass.js';
+// Import multi-source HTTP scraper (xpass + 4khdhub.one + vidsrc.to)
+import { scrapeAllSources } from './multisource.js';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -1460,14 +1462,14 @@ async function resolveStreams(target, userConfig, baseUrl) {
     return [];
   });
 
-  // 1d. xpass.top HTTP scraper (PRIMARY — works without backend or puppeteer)
-  // Fetches real HLS streams directly from play.xpass.top using HTTP only.
-  // Returns 3-8 working m3u8 streams per title.
-  const xpassPromise = scrapeXpass(searchTarget, title).then((streams) => {
-    console.log(`[xpass] returned ${streams.length} streams in ${Date.now() - startTime}ms`);
+  // 1d. Multi-source HTTP scraper (PRIMARY — works without backend or puppeteer)
+  // Scrapes xpass.top + 4khdhub.one + vidsrc.to using only HTTP (curl).
+  // Returns 4-12 working streams per title.
+  const xpassPromise = scrapeAllSources(searchTarget, title).then((streams) => {
+    console.log(`[multisource] returned ${streams.length} streams in ${Date.now() - startTime}ms`);
     return streams;
   }).catch((e) => {
-    console.log(`[xpass] failed (graceful degradation): ${e.message}`);
+    console.log(`[multisource] failed (graceful degradation): ${e.message}`);
     return [];
   });
 
