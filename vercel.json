@@ -109,6 +109,10 @@
     "api/health.js": {
       "memory": 128,
       "maxDuration": 5
+    },
+    "api/preview.js": {
+      "memory": 512,
+      "maxDuration": 10
     }
   },
   "headers": [

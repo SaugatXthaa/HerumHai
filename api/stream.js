@@ -50,6 +50,7 @@ import {
 
 // Import multi-source HTTP scraper (xpass + 4khdhub.one + vidsrc.to)
 import { scrapeAllSources } from './multisource.js';
+import { evaluateTemplate, formatStream, convertStreamToParseValue } from './formatter-engine.js';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -1709,290 +1710,16 @@ function filterByQuality(streams, userConfig) {
 }
 
 // ---------------------------------------------------------------------------
-// Template Engine — ported from public/index.html (Configure-WebUI)
+// Template Engine — ported from AIOStreams (https://github.com/Viren070/AIOStreams)
 // ----------------------------------------------------------------------------
-// This is the SAME engine that powers the live preview in the configurator
-// page. Porting it here means streams served to Stremio/Nuvio use the
-// EXACT formatter the user configured in the WebUI — including all the
-// fancy ::istrue, ::exists, ::replace, ::smallcaps, ::and::, ::or::,
-// and [...||...] conditional syntax.
-//
-// Source: public/index.html <script> block. Keep in sync if the WebUI
-// engine changes.
+// The full AIOStreams formatter engine is in ./formatter-engine.js
+// It supports: istrue, isfalse, exists, replace, remove, join, truncate,
+// translate, title, upper, lower, smallcaps, subscript, superscript, length,
+// first, last, sort, lsort, reverse, string, bytes, sbytes, sbytes10, sbytes2,
+// rbytes, bitrate, sbitrate, time, star, pstar, comma, hex, in, default, slice,
+// date, {?...?} optional groups, {tools.newLine}, {tools.removeLine},
+// 3-branch conditionals, escaped quotes, variable resolution, and more.
 // ---------------------------------------------------------------------------
-
-function toSmallCaps(str) {
-  const map = {
-    a:"ᴀ",b:"ʙ",c:"ᴄ",d:"ᴅ",e:"ᴇ",f:"ꜰ",g:"ɢ",h:"ʜ",i:"ɪ",j:"ᴊ",k:"ᴋ",l:"ʟ",m:"ᴍ",n:"ɴ",o:"ᴏ",p:"ᴘ",q:"q",r:"ʀ",s:"ꜱ",t:"ᴛ",u:"ᴜ",v:"ᴠ",w:"ᴡ",x:"x",y:"ʏ",z:"ᴢ",
-    A:"ᴀ",B:"ʙ",C:"ᴄ",D:"ᴅ",E:"ᴇ",F:"ꜰ",G:"ɢ",H:"ʜ",I:"ɪ",J:"ᴊ",K:"ᴋ",L:"ʟ",M:"ᴍ",N:"ɴ",O:"ᴏ",P:"ᴘ",Q:"q",R:"ʀ",S:"ꜱ",T:"ᴛ",U:"ᴜ",V:"ᴠ",W:"ᴡ",X:"x",Y:"ʏ",Z:"ᴢ",
-  };
-  return String(str).split("").map(function(c) { return map[c] || c; }).join("");
-}
-
-function splitTopLevel(str, delimiter) {
-  const parts = [];
-  let current = "";
-  let curlyDepth = 0, bracketDepth = 0, parenDepth = 0;
-  let inSingleQuote = false, inDoubleQuote = false;
-  for (let i = 0; i < str.length; i++) {
-    const char = str[i];
-    if (char === "\\" && (str[i + 1] === "'" || str[i + 1] === '"' || char === "\\")) {
-      current += str[i + 1]; i++; continue;
-    }
-    if (char === "'" && !inDoubleQuote) { inSingleQuote = !inSingleQuote; current += char; }
-    else if (char === '"' && !inSingleQuote) { inDoubleQuote = !inDoubleQuote; current += char; }
-    else if (!inSingleQuote && !inDoubleQuote) {
-      if (char === "{") curlyDepth++;
-      else if (char === "}") curlyDepth--;
-      else if (char === "[") bracketDepth++;
-      else if (char === "]") bracketDepth--;
-      else if (char === "(") parenDepth++;
-      else if (char === ")") parenDepth--;
-      if (curlyDepth === 0 && bracketDepth === 0 && parenDepth === 0 &&
-          str.substring(i, i + delimiter.length) === delimiter) {
-        parts.push(current); current = "";
-        i += delimiter.length - 1; continue;
-      }
-      current += char;
-    } else { current += char; }
-  }
-  parts.push(current);
-  return parts;
-}
-
-function cleanQuotes(str) {
-  str = str.trim();
-  if ((str.startsWith('"') && str.endsWith('"')) ||
-      (str.startsWith("'") && str.endsWith("'")) ||
-      (str.startsWith("`") && str.endsWith("`"))) {
-    return str.substring(1, str.length - 1);
-  }
-  if (str.startsWith('\\"') && str.endsWith('\\"')) {
-    return str.substring(2, str.length - 2);
-  }
-  return str;
-}
-
-function resolvePath(path, data) {
-  const parts = path.trim().split(".");
-  let val = data;
-  for (const p of parts) {
-    if (val === undefined || val === null) return undefined;
-    val = val[p];
-  }
-  return val;
-}
-
-function parseLogicalExpression(str) {
-  const segments = [];
-  const operators = [];
-  let current = "";
-  let curlyDepth = 0, bracketDepth = 0, parenDepth = 0;
-  let inSingleQuote = false, inDoubleQuote = false;
-  for (let i = 0; i < str.length; i++) {
-    const char = str[i];
-    if (char === "\\" && (str[i + 1] === "'" || str[i + 1] === '"' || char === "\\")) {
-      current += str[i + 1]; i++; continue;
-    }
-    if (char === "'" && !inDoubleQuote) { inSingleQuote = !inSingleQuote; current += char; }
-    else if (char === '"' && !inSingleQuote) { inDoubleQuote = !inDoubleQuote; current += char; }
-    else if (!inSingleQuote && !inDoubleQuote) {
-      if (char === "{") curlyDepth++;
-      else if (char === "}") curlyDepth--;
-      else if (char === "[") bracketDepth++;
-      else if (char === "]") bracketDepth--;
-      else if (char === "(") parenDepth++;
-      else if (char === ")") parenDepth--;
-      if (curlyDepth === 0 && bracketDepth === 0 && parenDepth === 0) {
-        if (str.substring(i, i + 7) === "::and::") {
-          segments.push(current); operators.push("and");
-          current = ""; i += 6; continue;
-        } else if (str.substring(i, i + 6) === "::or::") {
-          segments.push(current); operators.push("or");
-          current = ""; i += 5; continue;
-        }
-      }
-      current += char;
-    } else { current += char; }
-  }
-  segments.push(current);
-  return { segments, operators };
-}
-
-function evaluateSegment(segment, data) {
-  const parts = splitTopLevel(segment, "::");
-  const path = parts[0];
-  let currentVal = resolvePath(path, data);
-
-  for (let i = 1; i < parts.length; i++) {
-    const filterString = parts[i].trim();
-    if (!filterString) continue;
-
-    let filterName = filterString;
-    let args = [];
-    if (filterName.includes("(")) {
-      const openParen = filterName.indexOf("(");
-      const closeParen = filterName.lastIndexOf(")");
-      if (closeParen > openParen) {
-        const argsStr = filterName.substring(openParen + 1, closeParen);
-        args = splitTopLevel(argsStr, ",").map(a => cleanQuotes(a));
-        filterName = filterName.substring(0, openParen).trim();
-      }
-    }
-
-    if (filterName === "istrue") {
-      currentVal = (currentVal === true || String(currentVal) === "true");
-    } else if (filterName === "isfalse") {
-      currentVal = (currentVal === false || String(currentVal) === "false" || currentVal === undefined || currentVal === null);
-    } else if (filterName === "exists") {
-      // `exists` returns true only if the value is present AND truthy.
-      // - For arrays: must have at least 1 item
-      // - For booleans: must be `true` (false means "not present" in our data model)
-      // - For strings/numbers: must be non-empty/non-zero
-      // This matches aio-streams behavior where undetected fields are set to
-      // undefined/null (so ::exists correctly returns false).
-      if (Array.isArray(currentVal)) currentVal = currentVal.length > 0;
-      else if (typeof currentVal === 'boolean') currentVal = currentVal === true;
-      else if (typeof currentVal === 'number') currentVal = currentVal !== 0;
-      else currentVal = (currentVal !== undefined && currentVal !== null && currentVal !== "");
-    } else if (filterName === "lower") {
-      currentVal = String(currentVal ?? "").toLowerCase();
-    } else if (filterName === "upper") {
-      currentVal = String(currentVal ?? "").toUpperCase();
-    } else if (filterName === "string") {
-      currentVal = String(currentVal ?? "");
-    } else if (filterName === "smallcaps") {
-      currentVal = toSmallCaps(String(currentVal ?? ""));
-    } else if (filterName === "star") {
-      const score = Number(currentVal ?? 0);
-      const stars = Math.round(score / 20);
-      currentVal = "★".repeat(stars) + "☆".repeat(5 - stars);
-    } else if (filterName === "time") {
-      const seconds = Number(currentVal ?? 0);
-      const hours = Math.floor(seconds / 3600);
-      const minutes = Math.floor((seconds % 3600) / 60);
-      const secs = seconds % 60;
-      currentVal = `${hours}h:${minutes}m:${secs}s`;
-    } else if (filterName === "sbytes") {
-      const bytes = Number(currentVal);
-      if (!isNaN(bytes)) {
-        if (bytes >= 1073741824) currentVal = (bytes / 1073741824).toFixed(1) + " GB";
-        else if (bytes >= 1048576) currentVal = (bytes / 1048576).toFixed(0) + " MB";
-        else currentVal = bytes + " B";
-      } else currentVal = String(currentVal ?? "");
-    } else if (filterName === "sbitrate") {
-      const bps = Number(currentVal);
-      if (!isNaN(bps)) currentVal = (bps / 1000000).toFixed(1) + " Mbps";
-      else currentVal = String(currentVal ?? "");
-    } else if (filterName === "join") {
-      if (Array.isArray(currentVal)) currentVal = currentVal.join(args[0] || "");
-      else currentVal = String(currentVal ?? "");
-    } else if (filterName === "sort") {
-      if (Array.isArray(currentVal)) currentVal = [...currentVal].sort();
-    } else if (filterName === "lsort") {
-      if (Array.isArray(currentVal)) currentVal = [...currentVal].sort((a, b) => String(a).toLowerCase().localeCompare(String(b).toLowerCase()));
-    } else if (filterName === "truncate") {
-      const limit = parseInt(args[0] || "40", 10);
-      const s = String(currentVal ?? "");
-      currentVal = s.length > limit ? s.substring(0, limit) + "..." : s;
-    } else if (filterName === "replace") {
-      const search = args[0] || "";
-      const replaceWith = args[1] !== undefined ? args[1] : "";
-      currentVal = String(currentVal ?? "").split(search).join(replaceWith);
-    } else if (filterName.startsWith("=")) {
-      const target = filterName.substring(1);
-      currentVal = (String(currentVal ?? "") === target);
-    } else if (filterName.startsWith("~")) {
-      const target = filterName.substring(1);
-      currentVal = String(currentVal ?? "").toLowerCase().includes(target.toLowerCase());
-    } else if (filterName.startsWith(">")) {
-      const target = Number(filterName.substring(1));
-      currentVal = (Number(currentVal ?? 0) > target);
-    } else if (filterName.startsWith("<")) {
-      const target = Number(filterName.substring(1));
-      currentVal = (Number(currentVal ?? 0) < target);
-    }
-  }
-  return currentVal;
-}
-
-function evaluateCondition(conditionStr, data) {
-  const { segments, operators } = parseLogicalExpression(conditionStr);
-  if (segments.length === 0) return false;
-  const values = segments.map(seg => !!evaluateSegment(seg, data));
-  const stepValues = [...values];
-  const stepOperators = [...operators];
-  for (let i = 0; i < stepOperators.length; i++) {
-    if (stepOperators[i] === "and") {
-      const v1 = stepValues[i], v2 = stepValues[i + 1];
-      stepValues.splice(i, 2, v1 && v2);
-      stepOperators.splice(i, 1);
-      i--;
-    }
-  }
-  let result = stepValues[0];
-  for (let i = 0; i < stepOperators.length; i++) {
-    if (stepOperators[i] === "or") result = result || stepValues[i + 1];
-  }
-  return result;
-}
-
-function evaluateToken(token, data) {
-  try {
-    let bracketStart = -1;
-    let bracketDepth = 0;
-    for (let i = token.length - 1; i >= 0; i--) {
-      if (token[i] === "]") { bracketDepth++; }
-      else if (token[i] === "[") {
-        bracketDepth--;
-        if (bracketDepth === 0) { bracketStart = i; break; }
-      }
-    }
-    if (bracketStart !== -1) {
-      const conditionStr = token.substring(0, bracketStart).trim();
-      const bracketContent = token.substring(bracketStart + 1, token.length - 1);
-      const options = splitTopLevel(bracketContent, "||").map(opt => cleanQuotes(opt));
-      const trueOpt = options[0] || "";
-      const falseOpt = options[1] || "";
-      const isTrue = evaluateCondition(conditionStr, data);
-      const chosenOption = isTrue ? trueOpt : falseOpt;
-      return evaluateTemplate(chosenOption, data);
-    } else {
-      const result = evaluateSegment(token, data);
-      return result !== undefined && result !== null ? String(result) : "";
-    }
-  } catch (err) {
-    console.error("[formatter] token error:", token, err.message);
-    return "";
-  }
-}
-
-function evaluateTemplate(template, data) {
-  if (!template) return "";
-  let result = "";
-  let i = 0;
-  while (i < template.length) {
-    if (template[i] === "{") {
-      let balance = 1;
-      let j = i + 1;
-      while (j < template.length && balance > 0) {
-        if (template[j] === "{") balance++;
-        else if (template[j] === "}") balance--;
-        j++;
-      }
-      if (balance === 0) {
-        const tokenContent = template.substring(i + 1, j - 1);
-        result += evaluateToken(tokenContent, data);
-        i = j;
-      } else {
-        result += template[i]; i++;
-      }
-    } else {
-      result += template[i]; i++;
-    }
-  }
-  return result;
-}
 
 // ---------------------------------------------------------------------------
 // Stream info extraction → rich data object for the template engine
@@ -2485,95 +2212,191 @@ function extractStreamData(s, title, addonName) {
   // ---------------------------------------------------------------------------
   return {
     stream: {
-      library: false, // always false for non-user-library streams
-      resolution,
-      quality,
-      type,
-      nSeScore,
-      seadexBest: undefined,
-      seadex: undefined,
-      seeders,
-      audioTags,
-      visualTags,
-      filename,
-      encode,
-      audioChannels,
-      title: streamTitle,
-      year,
-      source: sourceSlug,
-      seasonEpisode,
-      duration,
-      uLanguageEmojis: languageEmojis.length > 0 ? languageEmojis : undefined,
-      uSubtitleEmojis: subtitleEmojis.length > 0 ? subtitleEmojis : undefined,
-      dubbed: isDualAudio ? true : undefined,
-      subbed: isSubbed ? true : undefined,
-      uLanguages: languages.length > 0 ? languages : undefined,
-      uSubtitles: subtitles.length > 0 ? subtitles : undefined,
-      uSmallLanguageCodes: languages,
-      uSmallSubtitleCodes: subtitles,
-      languages: languages.length > 0 ? languages : undefined,
-      subtitles: subtitles.length > 0 ? subtitles : undefined,
-      languageEmojis: languageEmojis.length > 0 ? languageEmojis : undefined,
-      subtitleEmojis: subtitleEmojis.length > 0 ? subtitleEmojis : undefined,
-      size,
-      folderSize,
-      bitrate,
-      message,
-      age,
-      releaseGroup,
-      indexer,
-      provider,
-      rankedRegexMatched: undefined,
-      rseMatched: undefined,
-      regexMatched: undefined,
-      network,
-      editions,
-      edition,
-      uncensored: isUncensored,
-      repack: isRepack,
-      regraded: isRegraded,
-      unrated: isUnrated,
-      upscaled: isUpscaled,
-      private: isPrivate,
-      freeleech: isFreeleech,
-      proxied: true, // we always proxy streams
+      library: false,
+      resolution: resolution || null,
+      quality: quality || null,
+      type: type || null,
+      nSeScore: nSeScore || null,
+      seadexBest: null,
+      seadex: null,
+      seeders: seeders || null,
+      audioTags: audioTags.length > 0 ? audioTags : null,
+      visualTags: visualTags.length > 0 ? visualTags : null,
+      filename: filename || null,
+      encode: encode || null,
+      audioChannels: audioChannels.length > 0 ? audioChannels : null,
+      title: streamTitle || null,
+      year: year || null,
+      source: sourceSlug || null,
+      seasonEpisode: seasonEpisode.length > 0 ? seasonEpisode : null,
+      duration: duration || null,
+      uLanguageEmojis: languageEmojis.length > 0 ? languageEmojis : null,
+      uSubtitleEmojis: subtitleEmojis.length > 0 ? subtitleEmojis : null,
+      dubbed: isDualAudio ? true : null,
+      subbed: isSubbed ? true : null,
+      uLanguages: languages.length > 0 ? languages : null,
+      uSubtitles: subtitles.length > 0 ? subtitles : null,
+      uSmallLanguageCodes: languages.length > 0 ? languages : null,
+      uSmallSubtitleCodes: subtitles.length > 0 ? subtitles : null,
+      languages: languages.length > 0 ? languages : null,
+      subtitles: subtitles.length > 0 ? subtitles : null,
+      languageEmojis: languageEmojis.length > 0 ? languageEmojis : null,
+      subtitleEmojis: subtitleEmojis.length > 0 ? subtitleEmojis : null,
+      size: size || null,
+      folderSize: folderSize || null,
+      bitrate: bitrate || null,
+      message: message || null,
+      age: age || null,
+      releaseGroup: releaseGroup || null,
+      indexer: indexer || null,
+      provider: provider || null,
+      rankedRegexMatched: null,
+      rseMatched: null,
+      regexMatched: null,
+      network: network || null,
+      editions: editions.length > 0 ? editions : null,
+      edition: edition || null,
+      uncensored: isUncensored || null,
+      repack: isRepack || null,
+      regraded: isRegraded || null,
+      unrated: isUnrated || null,
+      upscaled: isUpscaled || null,
+      private: isPrivate || null,
+      freeleech: isFreeleech || null,
+      proxied: true,
     },
     service: {
-      cached: isCached,
-      shortName: serviceShortName,
-      id: sourceSlug,
+      cached: isCached || null,
+      shortName: serviceShortName || null,
+      id: sourceSlug || null,
     },
     metadata: {
-      episodeRuntime,
-      runtime,
+      episodeRuntime: episodeRuntime || null,
+      runtime: runtime || null,
     },
     addon: {
       name: addonName || 'HerumHai',
     },
+    config: {
+      addonName: addonName || 'HerumHai',
+    },
   };
 }
 
-function formatStreams(streams, userConfig, title) {
-  const nameTpl = userConfig.nameTemplate;
-  const descTpl = userConfig.descriptionTemplate;
-  if (!nameTpl && !descTpl) return streams;
+// Fill in ALL fields from the AIOStreams FIELD_REGISTRY with null if absent.
+// The engine requires every registered field to be present (even as null),
+// otherwise it outputs {unknown_propertyName(...)} for missing fields.
+function fillMissingFields(data) {
+  const ALL_STREAM_FIELDS = [
+    'filename', 'folderName', 'size', 'bitrate', 'folderSize', 'library',
+    'quality', 'resolution', 'subbed', 'dubbed', 'languages', 'uLanguages',
+    'subtitles', 'uSubtitles', 'languageEmojis', 'uLanguageEmojis',
+    'subtitleEmojis', 'uSubtitleEmojis', 'languageCodes', 'uLanguageCodes',
+    'subtitleCodes', 'uSubtitleCodes', 'smallLanguageCodes', 'uSmallLanguageCodes',
+    'smallSubtitleCodes', 'uSmallSubtitleCodes', 'wedontknowwhatakilometeris',
+    'uWedontknowwhatakilometeris', 'visualTags', 'audioTags', 'releaseGroup',
+    'regexMatched', 'rankedRegexMatched', 'regexScore', 'nRegexScore', 'encode',
+    'audioChannels', 'edition', 'editions', 'remastered', 'regraded', 'repack',
+    'proper', 'uncensored', 'unrated', 'upscaled', 'hasChapters', 'network',
+    'container', 'extension', 'indexer', 'year', 'title', 'date', 'folderSeasons',
+    'formattedFolderSeasons', 'seasons', 'season', 'formattedSeasons', 'episodes',
+    'episode', 'formattedEpisodes', 'folderEpisodes', 'formattedFolderEpisodes',
+    'seasonEpisode', 'seasonPack', 'seeders', 'private', 'freeleech', 'age',
+    'ageHours', 'duration', 'infoHash', 'type', 'message', 'proxied', 'seadex',
+    'seadexBest', 'seScore', 'nSeScore', 'seMatched', 'rseMatched', 'preloading'
+  ];
+  if (!data.stream) data.stream = {};
+  for (const f of ALL_STREAM_FIELDS) {
+    if (data.stream[f] === undefined) data.stream[f] = null;
+  }
+  // Also fill service fields
+  const SERVICE_FIELDS = ['id', 'cached', 'shortName'];
+  if (!data.service) data.service = {};
+  for (const f of SERVICE_FIELDS) {
+    if (data.service[f] === undefined) data.service[f] = null;
+  }
+  // Also fill metadata fields
+  const META_FIELDS = ['episodeRuntime', 'runtime'];
+  if (!data.metadata) data.metadata = {};
+  for (const f of META_FIELDS) {
+    if (data.metadata[f] === undefined) data.metadata[f] = null;
+  }
+  // Also fill addon fields
+  if (!data.addon) data.addon = {};
+  if (data.addon.name === undefined) data.addon.name = null;
+  // Also fill config fields
+  if (!data.config) data.config = {};
+  if (data.config.addonName === undefined) data.config.addonName = null;
+  return data;
+}
 
+// ---------------------------------------------------------------------------
+// Default Tamtaro formatter (loaded from public/formatter.json at startup)
+let DEFAULT_NAME_TEMPLATE = null;
+let DEFAULT_DESC_TEMPLATE = null;
+
+async function loadDefaultFormatter() {
+  if (DEFAULT_NAME_TEMPLATE) return;
+  try {
+    // Try to load from the deployed /formatter.json
+    const protocol = 'https';
+    const host = process.env.VERCEL_URL || 'herum-hai.vercel.app';
+    const resp = await fetch(`https://${host}/formatter.json`, {
+      signal: AbortSignal.timeout(5000),
+    });
+    if (resp.ok) {
+      const fmt = await resp.json();
+      DEFAULT_NAME_TEMPLATE = fmt.name || null;
+      DEFAULT_DESC_TEMPLATE = fmt.description || null;
+      console.log(`[formatter] loaded Tamtaro default from /formatter.json (name=${DEFAULT_NAME_TEMPLATE?.length||0} chars)`);
+    }
+  } catch (e) {
+    console.log('[formatter] could not load default Tamtaro formatter:', e.message);
+  }
+}
+
+function formatStreams(streams, userConfig, title) {
+  // Use user-configured templates from /api/config if available,
+  // otherwise use the default Tamtaro formatter
+  const nameTpl = userConfig.nameTemplate || DEFAULT_NAME_TEMPLATE;
+  const descTpl = userConfig.descriptionTemplate || DEFAULT_DESC_TEMPLATE;
   const addonName = 'HerumHai';
 
+  if (!nameTpl && !descTpl) {
+    console.log('[formatter] no templates configured and no default loaded — skipping');
+    return streams;
+  }
+  console.log(`[formatter] using ${userConfig.nameTemplate ? 'user' : 'default'} templates (name=${nameTpl?.length||0} chars, desc=${descTpl?.length||0} chars)`);
+
   return streams.map(s => {
-    const data = extractStreamData(s, title, addonName);
+    const data = fillMissingFields(extractStreamData(s, title, addonName));
     let newName = s.name;
     let newDesc = s.description;
+
+    // Mark download streams with "Download" message
+    const isDownload = s.name && s.name.includes('⬇️');
+    if (isDownload) {
+      data.stream.message = 'Download';
+    }
+
     try {
-      if (nameTpl) newName = evaluateTemplate(nameTpl, data) || s.name;
+      const result = evaluateTemplate(nameTpl, data);
+      if (result) newName = result;
     } catch (e) {
       console.error('[formatter] nameTemplate error:', e.message);
     }
     try {
-      if (descTpl) newDesc = evaluateTemplate(descTpl, data) || s.description;
+      const result = evaluateTemplate(descTpl, data);
+      if (result) newDesc = result;
     } catch (e) {
       console.error('[formatter] descriptionTemplate error:', e.message);
     }
+
+    // Add "Download" text at the end for download streams
+    if (isDownload && !newDesc.includes('Download')) {
+      newDesc = newDesc + '\n⬇️ Download';
+    }
+
     return { ...s, name: newName, description: newDesc };
   });
 }
@@ -2689,6 +2512,10 @@ export default async function handler(req, res) {
     try {
       formatTitle = await resolveTitle(target);
     } catch {}
+    // Load default Tamtaro formatter if user hasn't configured one
+    if (!userConfig.nameTemplate && !userConfig.descriptionTemplate) {
+      await loadDefaultFormatter();
+    }
     streams = formatStreams(streams, userConfig, formatTitle || '');
     console.log(`[formatter] applied nameTemplate/descriptionTemplate to ${streams.length} streams`);
 
