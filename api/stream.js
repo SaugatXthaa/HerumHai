@@ -1631,28 +1631,33 @@ async function resolveStreams(target, userConfig, baseUrl) {
   console.log(`[scraper] total sorted streams: ${sorted.length} (${downloadCount} download) (in ${Date.now() - startTime}ms)`);
 
   // ---------------------------------------------------------------------------
-  // Route ALL streams through our /api/direct/proxy endpoint.
+  // Route streams through proxy ONLY for non-HLS streams.
+  // HLS (.m3u8) streams are returned directly with proxyHeaders — Stremio
+  // natively supports proxyHeaders and will send the correct User-Agent
+  // and Referer for each segment request. Proxying HLS causes issues because
+  // the proxy can't rewrite relative segment URLs in the m3u8 playlist.
   //
-  // Why: Many CDN URLs return 403 to Stremio's default User-Agent or require
-  // specific Referer headers. HLS streams (.m3u8) need ALL segment requests
-  // to carry the right headers — which only works through a server-side proxy.
-  //
-  // The proxy endpoint:
-  //   1. Fetches the upstream URL with a browser User-Agent
-  //   2. Adds the correct Referer header (extracted from proxyHeaders)
-  //   3. Forwards Range headers for seekable playback
-  //   4. Follows redirects manually (preserving Range across origins)
-  //   5. Pipes the response body through with no buffering
+  // Direct file streams (MKV/MP4) ARE proxied because they need browser
+  // headers and the proxy handles Range requests for seeking.
   // ---------------------------------------------------------------------------
   const proxiedStreams = sorted.map((s) => {
     if (!s.url) return s;
-    // Extract the Referer from the stream's proxyHeaders (if any)
+
+    const isHls = s.url.includes('.m3u8') || (s.behaviorHints?.filename || '').includes('.m3u8');
+    const isDownload = s.name && s.name.includes('⬇️');
+
+    if (isHls && !isDownload) {
+      // HLS streams: return directly with proxyHeaders
+      // Stremio will send the correct headers for each segment
+      const bh = { ...(s.behaviorHints || {}) };
+      bh.notWebReady = true;
+      return { ...s, behaviorHints: bh };
+    }
+
+    // Non-HLS streams (MKV/MP4 downloads): wrap in proxy
     const referer = s.behaviorHints?.proxyHeaders?.request?.Referer ||
                     s.behaviorHints?.proxyHeaders?.request?.referer || '';
-    // Wrap the URL in our proxy
     const proxiedUrl = proxyStreamUrl(s.url, baseUrl, referer);
-    // Update behaviorHints — the proxy handles headers, so Stremio doesn't need
-    // to send proxyHeaders anymore (the proxy adds them server-side)
     const bh = { ...(s.behaviorHints || {}) };
     bh.notWebReady = true;
     return {
@@ -1662,7 +1667,9 @@ async function resolveStreams(target, userConfig, baseUrl) {
     };
   });
 
-  console.log(`[scraper] proxied ${proxiedStreams.length} streams through /api/direct/proxy`);
+  const hlsCount = proxiedStreams.filter(s => !s.url.includes('/api/direct/proxy')).length;
+  const proxyCount = proxiedStreams.length - hlsCount;
+  console.log(`[scraper] ${hlsCount} HLS (direct) + ${proxyCount} proxied streams`);
   return proxiedStreams;
 }
 

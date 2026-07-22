@@ -68,12 +68,16 @@ const execFileAsync = promisify(execFile);
 async function checkUrl(url, timeout = 5) {
   try {
     const { stdout } = await execFileAsync('curl', [
-      '-s', '-o', '/dev/null', '-w', '%{http_code}',
+      '-s', '-o', '/dev/null', '-w', '%{http_code}|%{content_type}',
       '--max-time', String(timeout),
       '-A', MOBILE_UA,
-      '-L', url,
+      '-L', '-r', '0-0',  // Range request to get just 1 byte
+      url,
     ], { timeout: (timeout + 3) * 1000 });
-    return stdout.trim();
+    const [code, contentType] = stdout.trim().split('|');
+    // Reject HTML responses (not video)
+    if (contentType && contentType.includes('text/html')) return '000';
+    return code;
   } catch {
     return '000';
   }
@@ -200,7 +204,7 @@ async function scrapeXpass(target, title) {
   const testResults = await Promise.all(
     allSources.map(async (src) => ({
       ...src,
-      working: ['200', '206', '302', '307'].includes(checkUrl(src.file, 7)),
+      working: ["200","206","302","307"].includes(await checkUrl(src.file, 7)),
     }))
   );
   const working = testResults.filter(s => s.working);
@@ -330,7 +334,7 @@ async function scrape4khdhubOne(target, title) {
       if (!cdnUrl || !cdnUrl.startsWith('https://')) continue;
 
       // Step 5: Test the CDN URL (8s timeout — workers.dev can be slow)
-      const code = checkUrl(cdnUrl, 10);
+      const code = await checkUrl(cdnUrl, 10);
       if (!['200', '206'].includes(code)) {
         console.log(`[4khdhub.one] #${idx} ${hcId}: HTTP ${code} — skipping (quota exceeded)`);
         continue;
@@ -397,7 +401,7 @@ async function scrapeVidSrcTo(target, title) {
     const url = m[1];
     if (seen.has(url)) continue;
     seen.add(url);
-    const code = checkUrl(url, 4);
+    const code = await checkUrl(url, 4);
     if (['200', '206', '302', '307'].includes(code)) {
       streams.push({
         name: `HerumHai · VidSrc`,
