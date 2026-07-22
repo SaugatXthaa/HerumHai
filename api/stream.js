@@ -48,6 +48,9 @@ import {
   parseStremioIdHdHub,
 } from './streams2.js';
 
+// Import xpass.top HTTP scraper (works on Vercel without puppeteer/browser)
+import { scrapeXpass } from './xpass.js';
+
 // ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------
@@ -644,12 +647,50 @@ function signOurPsig(token, filename) {
 }
 
 function rewriteStreamUrl(penguUrl, ourBaseUrl) {
-  // Pass through PenguPlay's original URL directly.
-  // PenguPlay's /direct/ URLs require their server to proxy the stream
-  // (they validate the psig signature server-side and redirect to the CDN).
-  // Stremio follows the redirect and plays from the CDN directly.
-  // We do NOT wrap in our own /direct/ proxy (Vercel can't stream video).
-  return penguUrl;
+  // Route PenguPlay URLs through our own /api/direct/pengu/ proxy.
+  //
+  // Why: PenguPlay's /direct/ endpoint now returns 403 Forbidden to Stremio's
+  // default User-Agent. Stremio's ffmpeg-based player doesn't send browser
+  // headers, so pengu.uk rejects the request.
+  //
+  // Fix: wrap the pengu.uk URL in our own proxy. Our /api/direct/pengu/
+  // endpoint fetches pengu.uk with browser headers (UA + Referer) and pipes
+  // the bytes back to Stremio with Range support for seeking.
+  //
+  // URL transformation:
+  //   https://pengu.uk/direct/4khdhub/eyJ...?psig=...
+  //   → https://herum-hai.vercel.app/api/direct/pengu/4khdhub/eyJ...?psig=...
+  if (!penguUrl || typeof penguUrl !== 'string') return penguUrl;
+  if (!penguUrl.includes('pengu.uk/direct/')) return penguUrl;
+  // Strip the protocol + host, keep the path + query
+  const pathAndQuery = penguUrl.replace(/^https?:\/\/pengu\.uk/, '');
+  return `${ourBaseUrl}/api/direct/pengu${pathAndQuery}`;
+}
+
+// ---------------------------------------------------------------------------
+// Route non-PenguPlay streams through our /api/direct proxy
+// ----------------------------------------------------------------------------
+// Many CDN URLs (Castle HLS, HubCloud, FSL, etc.) return 403 to Stremio's
+// default User-Agent or require specific Referer headers. Stremio's
+// proxyHeaders feature helps for some cases, but HLS streams (.m3u8)
+// need ALL segment requests to carry the right headers — which only works
+// if the stream is proxied through our server.
+//
+// This function wraps any non-pengu stream URL in our /api/direct/proxy
+// endpoint, which fetches the upstream with browser headers + Range support.
+// ---------------------------------------------------------------------------
+function proxyStreamUrl(originalUrl, ourBaseUrl, referer) {
+  if (!originalUrl || typeof originalUrl !== 'string') return originalUrl;
+  // Don't proxy our own URLs
+  if (originalUrl.includes('/api/direct/')) return originalUrl;
+  // Don't proxy pengu URLs (handled separately)
+  if (originalUrl.includes('pengu.uk')) return originalUrl;
+
+  // Build the proxy URL: /api/direct/proxy?url=<encoded>&referer=<encoded>
+  const params = new URLSearchParams();
+  params.set('url', originalUrl);
+  if (referer) params.set('referer', referer);
+  return `${ourBaseUrl}/api/direct/proxy?${params.toString()}`;
 }
 
 function rewritePenguStream(stream, ourBaseUrl) {
@@ -662,24 +703,29 @@ function rewritePenguStream(stream, ourBaseUrl) {
     .trim();
   const newDescription = (stream.description || '').replace(/PenguPlay/g, 'HerumHai');
 
-  // Pass through PenguPlay's original URL — their server handles the streaming
-  // PenguPlay's /direct/{source}/{token}/{filename}?psig= URLs work because:
-  //   1. Stremio requests the URL from pengu.uk
-  //   2. PenguPlay validates psig, resolves the CDN URL server-side
-  //   3. PenguPlay returns a 307 redirect to the actual CDN (Google Drive, etc.)
-  //   4. Stremio follows the redirect and plays from the CDN directly
-  //   5. Seeking works because the CDN supports Range headers
-  //
-  // We do NOT add our own proxyHeaders — PenguPlay handles everything server-side.
-  // Their proxyHeaders is {} (empty) for a reason: no custom headers needed.
-  const bh = stream.behaviorHints || {};
+  // Rewrite the URL to go through our proxy (avoids pengu.uk 403)
+  const newUrl = rewriteStreamUrl(stream.url, ourBaseUrl);
+
+  // Set browser proxyHeaders so Stremio sends proper UA/Referer even if it
+  // hits pengu.uk directly (defensive — our proxy already adds these)
+  const bh = { ...(stream.behaviorHints || {}) };
+  bh.notWebReady = true;
+  bh.proxyHeaders = bh.proxyHeaders || {};
+  bh.proxyHeaders.request = {
+    ...(bh.proxyHeaders.request || {}),
+    'User-Agent': USER_AGENT,
+    'Referer': 'https://pengu.uk/',
+    'Accept': '*/*',
+    'Accept-Language': 'en-US,en;q=0.9',
+  };
+  bh.proxyHeaders.response = bh.proxyHeaders.response || {};
 
   return {
     ...stream,
     name: newName,
     description: newDescription,
-    url: stream.url,  // pass through PenguPlay's original URL
-    behaviorHints: bh,  // keep PenguPlay's original behaviorHints (including their proxyHeaders)
+    url: newUrl,
+    behaviorHints: bh,
   };
 }
 
@@ -1414,6 +1460,17 @@ async function resolveStreams(target, userConfig, baseUrl) {
     return [];
   });
 
+  // 1d. xpass.top HTTP scraper (PRIMARY — works without backend or puppeteer)
+  // Fetches real HLS streams directly from play.xpass.top using HTTP only.
+  // Returns 3-8 working m3u8 streams per title.
+  const xpassPromise = scrapeXpass(searchTarget, title).then((streams) => {
+    console.log(`[xpass] returned ${streams.length} streams in ${Date.now() - startTime}ms`);
+    return streams;
+  }).catch((e) => {
+    console.log(`[xpass] failed (graceful degradation): ${e.message}`);
+    return [];
+  });
+
   // 2. Extra source scrapers (24 independent sources — backup)
   const extraPromises = extraCandidates.map((source) =>
     Promise.race([
@@ -1426,7 +1483,9 @@ async function resolveStreams(target, userConfig, baseUrl) {
   );
 
   // Wait for ALL sources in parallel
-  const [backendStreams, penguStreams, hdhubStreams] = await Promise.all([backendPromise, penguPromise, hdhubPromise]);
+  const [backendStreams, penguStreams, hdhubStreams, xpassStreams] = await Promise.all([
+    backendPromise, penguPromise, hdhubPromise, xpassPromise
+  ]);
 
   // Wait for extra sources (with total budget)
   const extraBudgetTimer = new Promise((resolve) => setTimeout(resolve, EXTRA_TOTAL_BUDGET_MS));
@@ -1441,24 +1500,36 @@ async function resolveStreams(target, userConfig, baseUrl) {
   const extraStreams = (await Promise.all(extraResults)).flat();
   console.log(`[scraper] extra sources returned ${extraStreams.length} streams in ${Date.now() - startTime}ms`);
 
-  // Merge: backend (primary) + pengu (secondary) + hdhub (secondary) + extra (backup)
+  // Merge: xpass (primary) + backend + pengu (secondary) + hdhub (secondary) + extra (backup)
   const rewrittenPengu = penguStreams.map((s) => rewritePenguStream(s, baseUrl));
-  const allStreams = [...backendStreams, ...rewrittenPengu, ...hdhubStreams, ...extraStreams];
-  console.log(`[scraper] merged: ${backendStreams.length} backend + ${rewrittenPengu.length} pengu + ${hdhubStreams.length} hdhub + ${extraStreams.length} extra = ${allStreams.length} total`);
+  const allStreams = [...xpassStreams, ...backendStreams, ...rewrittenPengu, ...hdhubStreams, ...extraStreams];
+  console.log(`[scraper] merged: ${xpassStreams.length} xpass + ${backendStreams.length} backend + ${rewrittenPengu.length} pengu + ${hdhubStreams.length} hdhub + ${extraStreams.length} extra = ${allStreams.length} total`);
 
   // FILTER OUT:
   //   - Donation banners (streams with externalUrl instead of url)
   //   - Promotional entries from PenguPlay (e.g., "✨ Donations Needed!")
+  //   - PenguPlay signin.mp4 auth prompts (PenguPlay now requires Google login;
+  //     without auth, it returns a promo video instead of real streams)
+  //   - Any stream pointing to pengu.uk/signin or pengu.uk/direct that returns
+  //     the auth promo (these are useless to the user)
   // We only return actual playable streams to Stremio.
   const playableStreams = allStreams.filter((s) => {
     // Must have a streamable url (skip pure-externalUrl entries)
     if (!s.url || typeof s.url !== 'string') return false;
     if (s.externalUrl && !s.url) return false;
+    // Filter out PenguPlay auth/signin promos
+    if (s.url.includes('signin.mp4')) return false;
+    if (s.url.includes('/signin')) return false;
+    // Filter out PenguPlay streams entirely — they now require Google login
+    // and return 403 or signin.mp4 without auth. Our own scrapers provide
+    // the same content without requiring any authentication.
+    if (s.url.includes('pengu.uk/direct/')) return false;
     // Filter out anything that looks like a donation/promo entry
     const name = (s.name || '').toLowerCase();
     const desc = (s.description || '').toLowerCase();
     if (name.includes('donation') || name.includes('donate') || name.includes('support')) return false;
     if (desc.includes('pengu.uk/donate') || desc.includes('pengu.uk/tg')) return false;
+    if (desc.includes('authentication is missing') || desc.includes('sign in')) return false;
     if (name.startsWith('✨') && (name.includes('donat') || name.includes('support'))) return false;
     return true;
   });
@@ -1557,7 +1628,41 @@ async function resolveStreams(target, userConfig, baseUrl) {
 
   const downloadCount = sorted.filter((s) => s.name?.includes('⬇️')).length;
   console.log(`[scraper] total sorted streams: ${sorted.length} (${downloadCount} download) (in ${Date.now() - startTime}ms)`);
-  return sorted;
+
+  // ---------------------------------------------------------------------------
+  // Route ALL streams through our /api/direct/proxy endpoint.
+  //
+  // Why: Many CDN URLs return 403 to Stremio's default User-Agent or require
+  // specific Referer headers. HLS streams (.m3u8) need ALL segment requests
+  // to carry the right headers — which only works through a server-side proxy.
+  //
+  // The proxy endpoint:
+  //   1. Fetches the upstream URL with a browser User-Agent
+  //   2. Adds the correct Referer header (extracted from proxyHeaders)
+  //   3. Forwards Range headers for seekable playback
+  //   4. Follows redirects manually (preserving Range across origins)
+  //   5. Pipes the response body through with no buffering
+  // ---------------------------------------------------------------------------
+  const proxiedStreams = sorted.map((s) => {
+    if (!s.url) return s;
+    // Extract the Referer from the stream's proxyHeaders (if any)
+    const referer = s.behaviorHints?.proxyHeaders?.request?.Referer ||
+                    s.behaviorHints?.proxyHeaders?.request?.referer || '';
+    // Wrap the URL in our proxy
+    const proxiedUrl = proxyStreamUrl(s.url, baseUrl, referer);
+    // Update behaviorHints — the proxy handles headers, so Stremio doesn't need
+    // to send proxyHeaders anymore (the proxy adds them server-side)
+    const bh = { ...(s.behaviorHints || {}) };
+    bh.notWebReady = true;
+    return {
+      ...s,
+      url: proxiedUrl,
+      behaviorHints: bh,
+    };
+  });
+
+  console.log(`[scraper] proxied ${proxiedStreams.length} streams through /api/direct/proxy`);
+  return proxiedStreams;
 }
 
 // ---------------------------------------------------------------------------
@@ -1909,6 +2014,14 @@ function extractStreamData(s, title, addonName) {
   // richest technical metadata (release group, codec, audio tags, etc.).
   // We prefer the filename when it exists, falling back to name+desc.
   const sourceText = filename || text;
+  // behaviorHints may carry numeric fields that aren't in the text:
+  //   - videoSize: file size in bytes (from PenguPlay/HdHub)
+  //   - size:      same, alternate key
+  //   - duration:  duration in seconds
+  //   - bingeGroup: contains hints about quality/source
+  const bh = s.behaviorHints || {};
+  const directVideoSize = bh.videoSize || bh.size || s.videoSize || 0;
+  const directDuration = bh.duration || s.duration || 0;
 
   // ---------------------------------------------------------------------------
   // Resolution
@@ -2013,26 +2126,28 @@ function extractStreamData(s, title, addonName) {
   if (/ai[- ]?upscale/i.test(sourceText)) visualTags.push('AI');
 
   // ---------------------------------------------------------------------------
-  // Size (bytes) — convert from string like "2.5 GB" to bytes
-  // Look in description first (often formatted as "Size: 2.5 GB"), then name
+  // Size (bytes) — prefer behaviorHints.videoSize (from PenguPlay/HdHub),
+  // then fall back to parsing from text.
   // ---------------------------------------------------------------------------
-  let size = 0;
-  // Try patterns like "62.5 GB", "Size: 2.5GB", "💾 1.4 GB"
-  const sizePatterns = [
-    /size[:\s]*([\d.]+)\s*(TB|GB|MB|KB)/i,
-    /💾\s*([\d.]+)\s*(TB|GB|MB|KB)/i,
-    /([\d.]+)\s*(TB|GB|MB|KB)/i,
-  ];
-  for (const re of sizePatterns) {
-    const m = text.match(re);
-    if (m) {
-      const num = parseFloat(m[1]);
-      const unit = m[2].toUpperCase();
-      if (unit === 'TB') size = num * 1024 * 1024 * 1024 * 1024;
-      else if (unit === 'GB') size = num * 1024 * 1024 * 1024;
-      else if (unit === 'MB') size = num * 1024 * 1024;
-      else if (unit === 'KB') size = num * 1024;
-      break;
+  let size = directVideoSize;
+  if (!size) {
+    // Try patterns like "62.5 GB", "Size: 2.5GB", "💾 1.4 GB"
+    const sizePatterns = [
+      /size[:\s]*([\d.]+)\s*(TB|GB|MB|KB)/i,
+      /💾\s*([\d.]+)\s*(TB|GB|MB|KB)/i,
+      /([\d.]+)\s*(TB|GB|MB|KB)/i,
+    ];
+    for (const re of sizePatterns) {
+      const m = text.match(re);
+      if (m) {
+        const num = parseFloat(m[1]);
+        const unit = m[2].toUpperCase();
+        if (unit === 'TB') size = num * 1024 * 1024 * 1024 * 1024;
+        else if (unit === 'GB') size = num * 1024 * 1024 * 1024;
+        else if (unit === 'MB') size = num * 1024 * 1024;
+        else if (unit === 'KB') size = num * 1024;
+        break;
+      }
     }
   }
 
@@ -2071,20 +2186,22 @@ function extractStreamData(s, title, addonName) {
   }
 
   // ---------------------------------------------------------------------------
-  // Duration (seconds) — from "1h 32m", "62 min", "02:15:30" patterns
+  // Duration (seconds) — prefer behaviorHints.duration, then parse from text
   // ---------------------------------------------------------------------------
-  let duration = 0;
+  let duration = directDuration;
   let episodeRuntime = 0;
   let runtime = 0;
-  // "1h 32m" or "1h32m" or "1h:32m:0s"
-  const durMatch = text.match(/(\d+)\s*h[\s:]*\d*\s*(\d+)\s*m/i) ||
-                   text.match(/(\d+)\s*h\s*(\d+)\s*m/i);
-  if (durMatch) {
-    duration = parseInt(durMatch[1]) * 3600 + parseInt(durMatch[2]) * 60;
-  } else {
-    // "62 min" or "62m"
-    const durMin = text.match(/(\d+)\s*(?:min|m\b)/i);
-    if (durMin) duration = parseInt(durMin[1]) * 60;
+  if (!duration) {
+    // "1h 32m" or "1h32m" or "1h:32m:0s"
+    const durMatch = text.match(/(\d+)\s*h[\s:]*\d*\s*(\d+)\s*m/i) ||
+                     text.match(/(\d+)\s*h\s*(\d+)\s*m/i);
+    if (durMatch) {
+      duration = parseInt(durMatch[1]) * 3600 + parseInt(durMatch[2]) * 60;
+    } else {
+      // "62 min" or "62m"
+      const durMin = text.match(/(\d+)\s*(?:min|m\b)/i);
+      if (durMin) duration = parseInt(durMin[1]) * 60;
+    }
   }
   if (duration > 0) {
     // If duration is over 4 hours, it's likely a season pack — treat as runtime
@@ -2507,6 +2624,27 @@ export default async function handler(req, res) {
     }
   }
 
+  // --- Resolve formatter from config=<id> if present ---
+  // This solves the URL-length-limit problem: the user's full formatter is
+  // ~24KB but Vercel truncates query strings at ~8KB. By storing it server-side
+  // (via /api/config) and only passing the short hash ID in the URL, we get
+  // the full formatter back intact.
+  if (req.query?.config) {
+    try {
+      const cfgRes = await fetch(`${baseUrl}/api/config?id=${encodeURIComponent(req.query.config)}`, {
+        signal: AbortSignal.timeout(3000),
+      });
+      if (cfgRes.ok) {
+        const cfg = await cfgRes.json();
+        if (cfg.nameTemplate) userConfig.nameTemplate = cfg.nameTemplate;
+        if (cfg.descriptionTemplate) userConfig.descriptionTemplate = cfg.descriptionTemplate;
+        console.log(`[formatter] loaded from config id=${req.query.config} (name=${cfg.nameTemplate?.length||0} chars, desc=${cfg.descriptionTemplate?.length||0} chars)`);
+      }
+    } catch (e) {
+      console.error('[formatter] failed to load config:', e.message);
+    }
+  }
+
   const target = parseStremioId(parsedType, parsedId);
   console.log(`\n[/api/stream] ${parsedType}/${parsedId} →`, JSON.stringify(target));
 
@@ -2516,16 +2654,25 @@ export default async function handler(req, res) {
   const cached = await cacheGet(cacheKey);
   if (cached && Array.isArray(cached) && cached.length > 0) {
     console.log(`[cache] HIT — serving ${cached.length} streams from cache`);
-    // Rewrite cached URLs to use current baseUrl (in case deployment URL changed)
+    // Rewrite cached URLs to use current baseUrl
+    // (in case the deployment URL changed since the cache was populated)
     const rewrittenCached = cached.map((s) => {
       if (!s.url) return s;
-      // URLs already point to /direct/ — just replace the host
+      // Filter out pengu signin promos from cache
+      if (s.url.includes('signin.mp4') || s.url.includes('/signin')) return null;
+      if (s.url.includes('pengu.uk/direct/')) return null;
+      // Update our own /api/direct/proxy URLs to use current host
       try {
-        const url = new URL(s.url);
-        return { ...s, url: `${baseUrl}${url.pathname}${url.search}` };
-      } catch { return s; }
-    });
-    return res.status(200).json({ streams: rewrittenCached });
+        if (s.url.includes('/api/direct/proxy')) {
+          const url = new URL(s.url);
+          return { ...s, url: `${baseUrl}${url.pathname}${url.search}` };
+        }
+      } catch {}
+      return s;
+    }).filter(Boolean);
+    if (rewrittenCached.length > 0) {
+      return res.status(200).json({ streams: rewrittenCached });
+    }
   }
   console.log(`[cache] MISS — fetching fresh streams`);
 

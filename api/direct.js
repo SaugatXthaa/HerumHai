@@ -152,23 +152,174 @@ async function resolveHubCloud(hubcloudId, originalReferer) {
 }
 
 // ---------------------------------------------------------------------------
-// Stream Pipe (handles Range + streaming + client disconnect)
+// Stream Pipe (handles Range + streaming + client disconnect + cross-origin redirects)
 // ----------------------------------------------------------------------------
 
-async function pipeStream(req, res, directUrl, upstreamHeaders, source) {
+// Special variant for PenguPlay: does NOT send Range to the initial URL
+// (pengu.uk returns 403 if Range is present), but DOES send Range to the
+// redirect target (the CDN, which supports Range for seeking).
+async function pipeStreamWithRangePreservation(req, res, initialUrl, initialHeaders, rangeHeader, source) {
+  let currentUrl = initialUrl;
+  let currentHeaders = { ...initialHeaders };
   let upstream;
-  try {
-    upstream = await fetch(directUrl, {
-      headers: upstreamHeaders,
-      redirect: 'follow',
-    });
-  } catch (e) {
-    console.error(`[/api/direct] upstream fetch failed: ${e.message}`);
-    return res.status(502).json({ error: `Upstream fetch failed: ${e.message}` });
+  let redirectCount = 0;
+  const MAX_REDIRECTS = 5;
+  let isFirstHop = true;
+
+  while (redirectCount <= MAX_REDIRECTS) {
+    try {
+      upstream = await fetch(currentUrl, {
+        headers: currentHeaders,
+        redirect: 'manual',
+      });
+    } catch (e) {
+      console.error(`[/api/direct] upstream fetch failed: ${e.message}`);
+      return res.status(502).json({ error: `Upstream fetch failed: ${e.message}` });
+    }
+
+    if (upstream.status >= 300 && upstream.status < 400) {
+      const location = upstream.headers.get('location');
+      if (!location) {
+        console.error(`[/api/direct] ${source} redirect ${upstream.status} without Location`);
+        return res.status(502).json({ error: 'Redirect without Location' });
+      }
+      try {
+        currentUrl = new URL(location, currentUrl).href;
+      } catch {
+        currentUrl = location;
+      }
+      redirectCount++;
+      console.log(`[/api/direct] ${source} redirect ${upstream.status} → ${currentUrl.slice(0, 100)}`);
+
+      // After the first hop (pengu.uk), add the Range header for the CDN
+      if (isFirstHop && rangeHeader) {
+        currentHeaders['Range'] = rangeHeader;
+        console.log(`[/api/direct] ${source} adding Range header for CDN: ${rangeHeader}`);
+      }
+      isFirstHop = false;
+
+      // For cross-origin redirects, drop Referer/Origin (CDNs don't want them)
+      try {
+        const newOrigin = new URL(currentUrl).origin;
+        const oldOrigin = new URL(initialUrl).origin;
+        if (newOrigin !== oldOrigin) {
+          delete currentHeaders['Referer'];
+          delete currentHeaders['Origin'];
+          delete currentHeaders['Sec-Fetch-Mode'];
+          delete currentHeaders['Sec-Fetch-Site'];
+          delete currentHeaders['Sec-Fetch-Dest'];
+        }
+      } catch {}
+      continue;
+    }
+    break;
   }
 
-  if (!upstream.ok && upstream.status !== 206 && upstream.status !== 302) {
+  if (redirectCount > MAX_REDIRECTS) {
+    console.error(`[/api/direct] ${source} too many redirects`);
+    return res.status(502).json({ error: 'Too many redirects' });
+  }
+
+  if (!upstream.ok && upstream.status !== 206 && upstream.status !== 416) {
     console.error(`[/api/direct] ${source} upstream returned ${upstream.status}`);
+    try {
+      const errBody = await upstream.text();
+      console.error(`[/api/direct] error body: ${errBody.slice(0, 300)}`);
+    } catch {}
+    return res.status(502).json({ error: `Upstream returned ${upstream.status}` });
+  }
+
+  const headersToForward = [
+    'content-type', 'content-length', 'content-range', 'accept-ranges',
+    'last-modified', 'etag', 'cache-control', 'expires',
+  ];
+  for (const h of headersToForward) {
+    const v = upstream.headers.get(h);
+    if (v) res.setHeader(h, v);
+  }
+  res.setHeader('Cache-Control', 'no-store');
+  res.status(upstream.status === 206 ? 206 : (upstream.status === 416 ? 416 : 200));
+
+  const stream = Readable.fromWeb(upstream.body);
+  stream.pipe(res);
+
+  req.on('close', () => {
+    try { stream.destroy(); } catch {}
+  });
+}
+
+async function pipeStream(req, res, directUrl, upstreamHeaders, source) {
+  // ---------------------------------------------------------------------------
+  // Manually follow redirects (up to 5 hops).
+  //
+  // Why manual: `fetch()` with `redirect: 'follow'` strips the `Range` header
+  // when following cross-origin redirects (e.g., pengu.uk → googleusercontent.com).
+  // This breaks seeking in Stremio because the CDN returns the full file (200)
+  // instead of the requested byte range (206 Partial Content).
+  //
+  // Manual redirect following preserves all headers across origins.
+  // ---------------------------------------------------------------------------
+  let currentUrl = directUrl;
+  let currentHeaders = { ...upstreamHeaders };
+  let upstream;
+  let redirectCount = 0;
+  const MAX_REDIRECTS = 5;
+
+  while (redirectCount <= MAX_REDIRECTS) {
+    try {
+      upstream = await fetch(currentUrl, {
+        headers: currentHeaders,
+        redirect: 'manual',  // we handle redirects ourselves
+      });
+    } catch (e) {
+      console.error(`[/api/direct] upstream fetch failed: ${e.message}`);
+      return res.status(502).json({ error: `Upstream fetch failed: ${e.message}` });
+    }
+
+    // 3xx redirect → extract Location, re-fetch with same headers (incl. Range)
+    if (upstream.status >= 300 && upstream.status < 400) {
+      const location = upstream.headers.get('location');
+      if (!location) {
+        console.error(`[/api/direct] ${source} redirect ${upstream.status} without Location`);
+        return res.status(502).json({ error: `Redirect without Location` });
+      }
+      // Resolve relative URLs against the current URL
+      try {
+        currentUrl = new URL(location, currentUrl).href;
+      } catch {
+        currentUrl = location;
+      }
+      redirectCount++;
+      console.log(`[/api/direct] ${source} redirect ${upstream.status} → ${currentUrl.slice(0, 100)}`);
+      // For cross-origin redirects, drop Referer/Origin (CDNs don't want them)
+      try {
+        const newOrigin = new URL(currentUrl).origin;
+        const oldOrigin = new URL(directUrl).origin;
+        if (newOrigin !== oldOrigin) {
+          delete currentHeaders['Referer'];
+          delete currentHeaders['Origin'];
+        }
+      } catch {}
+      continue;
+    }
+
+    // Non-redirect response — proceed to stream
+    break;
+  }
+
+  if (redirectCount > MAX_REDIRECTS) {
+    console.error(`[/api/direct] ${source} too many redirects`);
+    return res.status(502).json({ error: 'Too many redirects' });
+  }
+
+  // Accept 200, 206 (Partial Content), and 416 (Range Not Satisfiable — return as-is)
+  if (!upstream.ok && upstream.status !== 206 && upstream.status !== 416) {
+    console.error(`[/api/direct] ${source} upstream returned ${upstream.status}`);
+    // Read the error body for debugging
+    try {
+      const errBody = await upstream.text();
+      console.error(`[/api/direct] error body: ${errBody.slice(0, 300)}`);
+    } catch {}
     return res.status(502).json({ error: `Upstream returned ${upstream.status}` });
   }
 
@@ -182,7 +333,7 @@ async function pipeStream(req, res, directUrl, upstreamHeaders, source) {
     if (v) res.setHeader(h, v);
   }
   res.setHeader('Cache-Control', 'no-store');
-  res.status(upstream.status === 206 ? 206 : 200);
+  res.status(upstream.status === 206 ? 206 : (upstream.status === 416 ? 416 : 200));
 
   // Stream the body through (no buffering — supports 4K movies)
   const stream = Readable.fromWeb(upstream.body);
@@ -214,6 +365,49 @@ export default async function handler(req, res) {
     const apiIdx = parts.findIndex((p) => p === 'api');
     if (apiIdx !== -1 && parts[apiIdx + 1] === 'direct') sourceIdx = apiIdx + 1;
   }
+
+  // Check for the generic proxy endpoint FIRST — it uses query params, not
+  // path segments, so the path-length validation below doesn't apply.
+  if (sourceIdx !== -1 && parts[sourceIdx + 1] === 'proxy') {
+    const targetUrl = req.query.url;
+    const referer = req.query.referer || '';
+
+    if (!targetUrl) {
+      return res.status(400).json({ error: 'Missing url parameter' });
+    }
+
+    // Validate URL — only allow http/https
+    try {
+      const parsed = new URL(targetUrl);
+      if (!['http:', 'https:'].includes(parsed.protocol)) {
+        return res.status(400).json({ error: 'Invalid URL protocol' });
+      }
+    } catch {
+      return res.status(400).json({ error: 'Invalid URL' });
+    }
+
+    console.log(`[/api/direct/proxy] proxying ${targetUrl.slice(0, 100)}`);
+
+    // Build upstream headers with browser UA + Referer
+    const upstreamHeaders = {
+      'User-Agent': USER_AGENT,
+      'Accept': '*/*',
+      'Accept-Language': 'en-US,en;q=0.9',
+    };
+    if (referer) {
+      upstreamHeaders['Referer'] = referer;
+      try {
+        upstreamHeaders['Origin'] = new URL(referer).origin;
+      } catch {}
+    }
+    // Forward Range header for seekable playback
+    if (req.headers.range) {
+      upstreamHeaders['Range'] = req.headers.range;
+    }
+
+    return pipeStream(req, res, targetUrl, upstreamHeaders, 'proxy');
+  }
+
   if (sourceIdx === -1 || sourceIdx + 2 >= parts.length) {
     return res.status(400).json({
       error: 'Invalid path',
@@ -225,6 +419,53 @@ export default async function handler(req, res) {
   const token = parts[sourceIdx + 2];
   const filename = decodeURIComponent(parts.slice(sourceIdx + 3).join('/')) || 'stream.mkv';
   const psig = req.query.psig;
+
+  // ---------------------------------------------------------------------------
+  // PenguPlay proxy: /api/direct/pengu/{original-source}/{token}/{filename}?psig=...
+  // ----------------------------------------------------------------------------
+  // PenguPlay's pengu.uk/direct/ endpoint returns 403 when:
+  //   - The User-Agent is not a browser (blocks ffmpeg/Stremio default UA)
+  //   - A Range header is sent (pengu's /direct/ is a redirect service, not a
+  //     streaming endpoint — it returns 307 to the CDN which handles Range)
+  //
+  // Our proxy fixes both issues:
+  //   1. Sends a browser User-Agent + Referer + Origin
+  //   2. Does NOT send Range to pengu.uk — lets it return 307 redirect
+  //   3. Follows the redirect to the CDN (googleusercontent.com, etc.)
+  //   4. Sends Range to the CDN (which supports it for seeking)
+  // ---------------------------------------------------------------------------
+  if (source === 'pengu') {
+    const realSource = parts[sourceIdx + 2];
+    const realToken = parts[sourceIdx + 3];
+    const realFilename = decodeURIComponent(parts.slice(sourceIdx + 4).join('/')) || 'stream.mkv';
+    const realPsig = req.query.psig;
+
+    if (!realSource || !realToken) {
+      return res.status(400).json({ error: 'Missing pengu source or token' });
+    }
+
+    // Reconstruct the original pengu.uk URL
+    let penguUrl = `${PENGU_UPSTREAM}/direct/${realSource}/${realToken}/${encodeURIComponent(realFilename)}`;
+    if (realPsig) penguUrl += `?psig=${realPsig}`;
+
+    console.log(`[/api/direct/pengu] proxying ${realSource} file=${realFilename.slice(0, 60)}`);
+
+    // Headers for pengu.uk — browser UA + Referer, but NO Range (causes 403)
+    const penguHeaders = {
+      'User-Agent': USER_AGENT,
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Referer': 'https://pengu.uk/',
+      'Origin': 'https://pengu.uk',
+      'Sec-Fetch-Mode': 'navigate',
+      'Sec-Fetch-Site': 'same-origin',
+      'Sec-Fetch-Dest': 'document',
+    };
+
+    // Use a custom pipeStream that preserves Range for the redirect target
+    // but NOT for the initial pengu.uk request
+    return pipeStreamWithRangePreservation(req, res, penguUrl, penguHeaders, req.headers.range, `pengu-${realSource}`);
+  }
 
   // Verify HMAC signature (rejects tampered / expired URLs)
   if (!verifyPsig(token, filename, psig)) {

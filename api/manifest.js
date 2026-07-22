@@ -58,7 +58,7 @@ const DEFAULT_ENABLED_SOURCES = [
   'source_tatvamovies', 'source_cinefreak', 'source_moviebox', 'source_hdghartv'
 ];
 
-export default function handler(req, res) {
+export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -97,6 +97,29 @@ export default function handler(req, res) {
     }
   }
 
+  // --- Resolve formatter templates ---
+  // Two ways to provide the formatter:
+  //   1. config=<id>   — short hash ID, fetched from /api/config (preferred;
+  //                      supports full 24KB formatter without URL truncation)
+  //   2. nameTemplate=...&descriptionTemplate=... — direct URL params (legacy;
+  //                      limited to ~8KB total before Vercel truncates)
+  let nameTemplate = query.nameTemplate || '';
+  let descriptionTemplate = query.descriptionTemplate || '';
+  if (query.config) {
+    try {
+      const cfgRes = await fetch(`${baseUrl}/api/config?id=${encodeURIComponent(query.config)}`, {
+        signal: AbortSignal.timeout(3000),
+      });
+      if (cfgRes.ok) {
+        const cfg = await cfgRes.json();
+        if (cfg.nameTemplate) nameTemplate = cfg.nameTemplate;
+        if (cfg.descriptionTemplate) descriptionTemplate = cfg.descriptionTemplate;
+      }
+    } catch (e) {
+      console.error('[manifest] failed to fetch config:', e.message);
+    }
+  }
+
   // Build config array
   const configArray = [
     // Source toggles
@@ -126,18 +149,18 @@ export default function handler(req, res) {
       title: 'Excluded Qualities',
       default: query.excluded,
     }] : []),
-    // Formatter (from Configure-WebUI)
-    ...(query.nameTemplate ? [{
+    // Formatter — exposed as Stremio config fields so users can edit in Stremio UI
+    ...(nameTemplate ? [{
       key: 'nameTemplate',
       type: 'text',
       title: 'Stream Name Template',
-      default: query.nameTemplate,
+      default: nameTemplate,
     }] : []),
-    ...(query.descriptionTemplate ? [{
+    ...(descriptionTemplate ? [{
       key: 'descriptionTemplate',
       type: 'text',
       title: 'Stream Description Template',
-      default: query.descriptionTemplate,
+      default: descriptionTemplate,
     }] : []),
     // Subtitles
     {

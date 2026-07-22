@@ -600,8 +600,16 @@ document.getElementById('preset-select').onchange = function() {
   var val = this.value;
   currentPreset = val;
   if (PRESETS[val]) {
+    // Built-in preset
     document.getElementById('name-template').value = PRESETS[val].name;
     document.getElementById('desc-template').value = PRESETS[val].desc;
+  } else {
+    // Saved preset (id starts with "saved_")
+    var saved = savedPresets.find(function(p) { return p.id === val; });
+    if (saved) {
+      document.getElementById('name-template').value = saved.nameTemplate;
+      document.getElementById('desc-template').value = saved.descriptionTemplate;
+    }
   }
   updateAll();
 };
@@ -645,11 +653,44 @@ function toggleSnippets() { document.getElementById('snippets-panel').classList.
 function savePreset() {
   var name = document.getElementById('preset-name-input').value.trim();
   if (!name) { alert('Enter a preset name.'); return; }
-  savedPresets.push({ id: 'saved_' + Date.now(), name: name, nameTemplate: document.getElementById('name-template').value, descriptionTemplate: document.getElementById('desc-template').value });
+  var preset = {
+    id: 'saved_' + Date.now(),
+    name: name,
+    nameTemplate: document.getElementById('name-template').value,
+    descriptionTemplate: document.getElementById('desc-template').value
+  };
+  savedPresets.push(preset);
   localStorage.setItem('herumhai_saved_formatters', JSON.stringify(savedPresets));
+  // Add the new preset to the dropdown so the user can see it was saved
+  var sel = document.getElementById('preset-select');
+  var opt = document.createElement('option');
+  opt.value = preset.id;
+  opt.textContent = '★ ' + name;
+  sel.appendChild(opt);
+  // Select the newly saved preset
+  sel.value = preset.id;
+  currentPreset = preset.id;
   document.getElementById('preset-name-input').value = '';
-  showNotification('Preset saved!');
+  showNotification('Preset "' + name + '" saved!');
 }
+
+// Populate the preset dropdown with any saved presets from localStorage
+function refreshSavedPresets() {
+  var sel = document.getElementById('preset-select');
+  // Remove any existing saved-preset options (those with value starting "saved_")
+  Array.from(sel.options).forEach(function(opt) {
+    if (opt.value.indexOf('saved_') === 0) sel.removeChild(opt);
+  });
+  // Re-add them from savedPresets
+  savedPresets.forEach(function(p) {
+    var opt = document.createElement('option');
+    opt.value = p.id;
+    opt.textContent = '★ ' + p.name;
+    sel.appendChild(opt);
+  });
+}
+// Call on load to populate the dropdown
+refreshSavedPresets();
 
 function exportConfig() {
   var data = { name: document.getElementById('name-template').value, description: document.getElementById('desc-template').value };
@@ -709,14 +750,55 @@ function updatePreview() {
 }
 
 // === URL (display block removed — only used internally for install/copy buttons) ===
-function updateUrl() {
+// CRITICAL: The user's full formatter JSON is ~24KB but Vercel truncates query
+// strings at ~8KB. To avoid the formatter being silently cut off (which
+// produces broken/messed-up stream output), we POST the formatter to /api/config
+// and use the returned short hash ID in the install URL.
+//   Old (broken): ?nameTemplate=<24KB>&descriptionTemplate=<24KB>
+//   New (works):  ?config=<8-char-id>&res_2160=true&...
+var currentConfigId = null;
+var currentFullUrl = null;
+
+async function buildInstallUrl() {
   var params = new URLSearchParams();
   RESOLUTIONS.forEach(function(r) { params.set(r.key, r.selected ? 'true' : 'false'); });
-  params.set('nameTemplate', document.getElementById('name-template').value);
-  params.set('descriptionTemplate', document.getElementById('desc-template').value);
+
+  var nameTpl = document.getElementById('name-template').value;
+  var descTpl = document.getElementById('desc-template').value;
+
+  // Always POST the formatter to /api/config to get a short ID. This works
+  // even for small formatters, and dedupes (same content → same ID).
+  try {
+    var resp = await fetch(window.location.origin + '/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nameTemplate: nameTpl, descriptionTemplate: descTpl })
+    });
+    if (resp.ok) {
+      var data = await resp.json();
+      currentConfigId = data.id;
+      params.set('config', data.id);
+    }
+  } catch (e) {
+    console.error('Failed to store formatter config:', e);
+    // Fallback: put the raw templates in the URL (will likely truncate for big formatters)
+    params.set('nameTemplate', nameTpl);
+    params.set('descriptionTemplate', descTpl);
+  }
+
   var url = window.location.origin + '/manifest.json?' + params.toString();
-  document.getElementById('install-btn').onclick = function() { window.open('stremio://' + url.replace(/^https?:\/\//,''), '_blank'); };
-  document.getElementById('copy-btn').onclick = function() {
+  currentFullUrl = url;
+  return url;
+}
+
+function updateUrl() {
+  // Wire up the install/copy buttons to use the async URL builder
+  document.getElementById('install-btn').onclick = async function() {
+    var url = await buildInstallUrl();
+    window.open('stremio://' + url.replace(/^https?:\/\//,''), '_blank');
+  };
+  document.getElementById('copy-btn').onclick = async function() {
+    var url = await buildInstallUrl();
     navigator.clipboard.writeText(url);
     var b = document.getElementById('copy-btn'); var o = b.innerHTML;
     b.innerHTML = '✓ Copied!';
