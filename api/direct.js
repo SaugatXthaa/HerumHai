@@ -323,6 +323,13 @@ async function pipeStream(req, res, directUrl, upstreamHeaders, source) {
     return res.status(502).json({ error: `Upstream returned ${upstream.status}` });
   }
 
+  // Check content-type — reject HTML responses (not video)
+  const contentType = upstream.headers.get('content-type') || '';
+  if (contentType.includes('text/html') || contentType.includes('application/json')) {
+    console.error(`[/api/direct] ${source} returned HTML/JSON (not video): ${contentType}`);
+    return res.status(502).json({ error: `Upstream returned HTML, not video (${contentType})` });
+  }
+
   // Forward relevant response headers
   const headersToForward = [
     'content-type', 'content-length', 'content-range', 'accept-ranges',

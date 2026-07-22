@@ -1521,11 +1521,23 @@ async function resolveStreams(target, userConfig, baseUrl) {
     // Filter out PenguPlay auth/signin promos
     if (s.url.includes('signin.mp4')) return false;
     if (s.url.includes('/signin')) return false;
-    // Filter out PenguPlay streams entirely — they now require Google login
-    // and return 403 or signin.mp4 without auth. Our own scrapers provide
-    // the same content without requiring any authentication.
+    // Filter out PenguPlay streams entirely
     if (s.url.includes('pengu.uk/direct/')) return false;
-    // Filter out anything that looks like a donation/promo entry
+    // Filter out Castle HLS streams — their auth_key tokens expire within minutes,
+    // causing "[mpv] unrecognized file format" errors when Stremio tries to play them
+    if (s.url.includes('bxncw.com') || s.url.includes('fvncw.com') ||
+        s.url.includes('flocw.com') || s.url.includes('klcxm.com') ||
+        s.url.includes('hvncw.com') || s.url.includes('wnowe.com') ||
+        s.url.includes('hvncw.com')) return false;
+    // Filter out HubCloud CDN URLs that return HTML/400 (not video)
+    if (s.url.includes('pixel.hubcloud.cx/?id=') || s.url.includes('gpdl.hubcloud.cx/?id=') ||
+        s.url.includes('gpdl2.hubcloud.cx/?id=')) return false;
+    // Filter out HubCloud drive page URLs (they return HTML, not video)
+    if (s.url.includes('hubcloud.cx/') && !s.url.includes('/drive/')) return false;
+    if (s.url.includes('hubcloud.ist/') && !s.url.includes('/drive/')) return false;
+    // Filter out Cloudflare R2 URLs that return 403
+    if (s.url.includes('.r2.cloudflarestorage.com/')) return false;
+    // Filter out donation/promo entries
     const name = (s.name || '').toLowerCase();
     const desc = (s.description || '').toLowerCase();
     if (name.includes('donation') || name.includes('donate') || name.includes('support')) return false;
@@ -1631,46 +1643,30 @@ async function resolveStreams(target, userConfig, baseUrl) {
   console.log(`[scraper] total sorted streams: ${sorted.length} (${downloadCount} download) (in ${Date.now() - startTime}ms)`);
 
   // ---------------------------------------------------------------------------
-  // Route streams through proxy ONLY for non-HLS streams.
-  // HLS (.m3u8) streams are returned directly with proxyHeaders — Stremio
-  // natively supports proxyHeaders and will send the correct User-Agent
-  // and Referer for each segment request. Proxying HLS causes issues because
-  // the proxy can't rewrite relative segment URLs in the m3u8 playlist.
-  //
-  // Direct file streams (MKV/MP4) ARE proxied because they need browser
-  // headers and the proxy handles Range requests for seeking.
+  // Return ALL streams directly with proxyHeaders.
+  // Stremio natively supports proxyHeaders — it sends the correct User-Agent
+  // and Referer when fetching each stream. This is more reliable than proxying
+  // through our server because:
+  //   1. No Vercel timeout (streaming large files through proxy can timeout)
+  //   2. No Vercel response size limits
+  //   3. No double-hop latency (Stremio → Vercel → CDN → Vercel → Stremio)
+  //   4. HLS segment URLs work correctly (proxy can't rewrite relative URLs)
   // ---------------------------------------------------------------------------
-  const proxiedStreams = sorted.map((s) => {
+  const directStreams = sorted.map((s) => {
     if (!s.url) return s;
-
-    const isHls = s.url.includes('.m3u8') || (s.behaviorHints?.filename || '').includes('.m3u8');
-    const isDownload = s.name && s.name.includes('⬇️');
-
-    if (isHls && !isDownload) {
-      // HLS streams: return directly with proxyHeaders
-      // Stremio will send the correct headers for each segment
-      const bh = { ...(s.behaviorHints || {}) };
-      bh.notWebReady = true;
-      return { ...s, behaviorHints: bh };
-    }
-
-    // Non-HLS streams (MKV/MP4 downloads): wrap in proxy
-    const referer = s.behaviorHints?.proxyHeaders?.request?.Referer ||
-                    s.behaviorHints?.proxyHeaders?.request?.referer || '';
-    const proxiedUrl = proxyStreamUrl(s.url, baseUrl, referer);
     const bh = { ...(s.behaviorHints || {}) };
     bh.notWebReady = true;
-    return {
-      ...s,
-      url: proxiedUrl,
-      behaviorHints: bh,
-    };
+    // Ensure proxyHeaders are set with browser User-Agent
+    if (!bh.proxyHeaders) bh.proxyHeaders = {};
+    if (!bh.proxyHeaders.request) bh.proxyHeaders.request = {};
+    if (!bh.proxyHeaders.request['User-Agent']) {
+      bh.proxyHeaders.request['User-Agent'] = USER_AGENT;
+    }
+    return { ...s, behaviorHints: bh };
   });
 
-  const hlsCount = proxiedStreams.filter(s => !s.url.includes('/api/direct/proxy')).length;
-  const proxyCount = proxiedStreams.length - hlsCount;
-  console.log(`[scraper] ${hlsCount} HLS (direct) + ${proxyCount} proxied streams`);
-  return proxiedStreams;
+  console.log(`[scraper] ${directStreams.length} streams (all direct with proxyHeaders)`);
+  return directStreams;
 }
 
 // ---------------------------------------------------------------------------
