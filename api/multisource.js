@@ -6,9 +6,11 @@
 //
 // Sources:
 //   1. xpass.top (PRIMARY) — returns 4-8 HLS streams per title
+//      - Movies: uses IMDb ID directly
+//      - TV/Anime: resolves to TMDB ID first (xpass requires TMDB for TV)
 //   2. 4khdhub.one — WordPress site with HubCloud embed links
+//      - Returns 5-10+ HubCloud streams per title
 //   3. vidsrc.to → vsembed.ru — embed provider (fallback)
-//   4. Direct embed providers (2embed.cc, vidsrc.win, etc.)
 //
 // For sources that require JS rendering (HubCloud), we extract the HubCloud IDs
 // from the WordPress detail pages and wrap them as direct proxy URLs that
@@ -19,7 +21,7 @@ import { execFileSync } from 'node:child_process';
 
 const MOBILE_UA =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 ' +
-  '(KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
+  '(KHTML, like Gecko) Version=17.0 Mobile/15E148 Safari/604.1';
 const DESKTOP_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 
@@ -73,6 +75,48 @@ function checkUrl(url, timeout = 5) {
 }
 
 // ---------------------------------------------------------------------------
+// TMDB ID resolution — xpass.top requires TMDB IDs for TV/Anime
+// ---------------------------------------------------------------------------
+async function resolveTmdbId(imdbId, type, title) {
+  if (!imdbId && !title) return null;
+
+  // Method 1: IMDb → TMDB via /find endpoint
+  if (imdbId) {
+    try {
+      const kind = type === 'movie' ? 'movie' : 'tv';
+      const url = `https://api.themoviedb.org/3/find/${imdbId}?api_key=${TMDB_API_KEY}&external_source=imdb_id`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+      if (res.ok) {
+        const data = await res.json();
+        const arr = data?.[`${kind}_results`] || [];
+        if (arr[0]?.id) {
+          console.log(`[tmdb] ${imdbId} → ${arr[0].id} (${arr[0].title || arr[0].name})`);
+          return String(arr[0].id);
+        }
+      }
+    } catch {}
+  }
+
+  // Method 2: Title → TMDB via search
+  if (title) {
+    try {
+      const kind = type === 'movie' ? 'movie' : 'tv';
+      const url = `https://api.themoviedb.org/3/search/${kind}?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(title)}`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.results?.[0]?.id) {
+          console.log(`[tmdb] "${title}" → ${data.results[0].id} (${data.results[0].title || data.results[0].name})`);
+          return String(data.results[0].id);
+        }
+      }
+    } catch {}
+  }
+
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // Source 1: xpass.top (PRIMARY — works via HTTP, returns 4-8 HLS streams)
 // ---------------------------------------------------------------------------
 async function scrapeXpass(target, title) {
@@ -80,32 +124,43 @@ async function scrapeXpass(target, title) {
 
   let embedUrl;
   if (type === 'movie' && imdbId) {
+    // Movies use IMDb ID directly
     embedUrl = `https://play.xpass.top/e/movie/${imdbId}`;
   } else if (type === 'series' && imdbId) {
-    embedUrl = `https://play.xpass.top/e/tv/${imdbId}/${season || 1}/${episode || 1}`;
+    // Series need TMDB ID — resolve IMDb → TMDB
+    const tmdbId = await resolveTmdbId(imdbId, 'series', title);
+    if (!tmdbId) {
+      console.log(`[xpass] could not resolve TMDB ID for series ${imdbId}`);
+      return [];
+    }
+    embedUrl = `https://play.xpass.top/e/tv/${tmdbId}/${season || 1}/${episode || 1}`;
   } else if (type === 'anime') {
+    // Anime needs TMDB ID — resolve from kitsu/title
     let tmdbId = null;
     if (imdbId) {
+      tmdbId = await resolveTmdbId(imdbId, 'anime', title);
+    }
+    if (!tmdbId && title) {
+      tmdbId = await resolveTmdbId(null, 'anime', title);
+    }
+    if (!tmdbId && kitsuId) {
+      // Get title from kitsu, then search TMDB
       try {
-        const url = `https://api.themoviedb.org/3/find/${imdbId}?api_key=${TMDB_API_KEY}&external_source=imdb_id`;
-        const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
-        if (res.ok) {
-          const data = await res.json();
-          if (data?.tv_results?.[0]?.id) tmdbId = String(data.tv_results[0].id);
+        const kitsuRes = await fetch(`https://kitsu.io/api/edge/anime/${kitsuId}`, { signal: AbortSignal.timeout(8000) });
+        if (kitsuRes.ok) {
+          const kitsuData = await kitsuRes.json();
+          const kitsuTitle = kitsuData?.data?.attributes?.canonicalTitle;
+          if (kitsuTitle) {
+            console.log(`[kitsu] ${kitsuId} → "${kitsuTitle}"`);
+            tmdbId = await resolveTmdbId(null, 'anime', kitsuTitle);
+          }
         }
       } catch {}
     }
-    if (!tmdbId && kitsuId && title) {
-      try {
-        const url = `https://api.themoviedb.org/3/search/tv?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(title)}`;
-        const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.results?.[0]?.id) tmdbId = String(data.results[0].id);
-        }
-      } catch {}
+    if (!tmdbId) {
+      console.log(`[xpass] could not resolve TMDB ID for anime ${kitsuId || imdbId}`);
+      return [];
     }
-    if (!tmdbId) return [];
     embedUrl = `https://play.xpass.top/e/tv/${tmdbId}/${season || 1}/${episode || 1}`;
   } else {
     return [];
@@ -114,6 +169,12 @@ async function scrapeXpass(target, title) {
   console.log(`[xpass] fetching ${embedUrl}`);
   const html = curl(embedUrl, { referer: 'https://www.2embed.cc/' });
   if (!html || html.includes('Just a moment')) return [];
+
+  // Check if xpass found the title (id=0 means not found)
+  if (html.includes('"playlist":"/vxr/tv/0/') || html.includes('"playlist":"/vrk/tv/0/')) {
+    console.log('[xpass] title not found (id=0)');
+    return [];
+  }
 
   // Extract all playlist URLs
   const playlistPaths = new Set();
@@ -172,92 +233,17 @@ async function scrapeXpass(target, title) {
 
 // ---------------------------------------------------------------------------
 // Source 2: 4khdhub.one — WordPress site with HubCloud embed links
+// NOTE: HubCloud drive URLs are JS-rendered and cannot be resolved without
+// a browser. The HubCloud streams are SKIPPED because they would return HTML
+// instead of video when played through our proxy.
+// This source is disabled until we have a browser-based resolver.
 // ---------------------------------------------------------------------------
 async function scrape4khdhubOne(target, title) {
-  const { type, imdbId, season, episode } = target;
-  if (!title) return [];
-
-  // Search for the title
-  const searchUrl = `https://4khdhub.one/?s=${encodeURIComponent(title)}`;
-  console.log(`[4khdhub.one] searching: ${searchUrl}`);
-  const searchHtml = curl(searchUrl, { ua: DESKTOP_UA, timeout: 8 });
-  if (!searchHtml) return [];
-
-  // Find detail page links (both absolute and relative)
-  // Only include links that look like movie/show detail pages (slug-based)
-  const detailLinks = new Set();
-  const skipExtensions = ['.png', '.svg', '.ico', '.jpg', '.jpeg', '.gif', '.webp', '.css', '.js', '.json', '.xml', '.webmanifest'];
-  const skipPrefixes = ['/images/', '/css/', '/js/', '/category/', '/tag/', '/page/', '/wp-', '/author/', '/feed', '/comments', '/about', '/contact', '/dmca', '/privacy'];
-
-  for (const m of searchHtml.matchAll(/href="(https?:\/\/4khdhub\.one\/[^"]+)"/g)) {
-    const link = m[1];
-    if (skipExtensions.some(ext => link.endsWith(ext))) continue;
-    if (skipPrefixes.some(p => link.includes(p))) continue;
-    if (link.includes('/?s=') || link === 'https://4khdhub.one/') continue;
-    detailLinks.add(link);
-  }
-  // Also check for relative links like /inception-movie-509/
-  for (const m of searchHtml.matchAll(/href="(\/[^"]+)"/g)) {
-    const link = m[1];
-    if (skipExtensions.some(ext => link.endsWith(ext))) continue;
-    if (skipPrefixes.some(p => link.startsWith(p))) continue;
-    if (link === '/' || link.startsWith('/?')) continue;
-    // Must look like a detail slug (contains hyphens and/or numbers)
-    if (!/\/[a-z0-9-]+\/?$/i.test(link)) continue;
-    detailLinks.add(`https://4khdhub.one${link}`);
-  }
-
-  if (detailLinks.size === 0) {
-    console.log('[4khdhub.one] no detail links found');
-    return [];
-  }
-
-  console.log(`[4khdhub.one] found ${detailLinks.size} detail links`);
-
-  // Fetch each detail page and extract HubCloud IDs
-  const hubcloudIds = new Set();
-  for (const link of Array.from(detailLinks).slice(0, 3)) {
-    const detailHtml = curl(link, { ua: DESKTOP_UA, referer: 'https://4khdhub.one/', timeout: 8 });
-    if (!detailHtml) continue;
-
-    // Extract HubCloud drive IDs
-    for (const m of detailHtml.matchAll(/hubcloud\.(?:ist|cx|club|fans)\/drive\/([a-zA-Z0-9_-]+)/gi)) {
-      hubcloudIds.add(m[1]);
-    }
-  }
-
-  if (hubcloudIds.size === 0) {
-    console.log('[4khdhub.one] no HubCloud IDs found');
-    return [];
-  }
-
-  console.log(`[4khdhub.one] found ${hubcloudIds.size} HubCloud IDs`);
-
-  // Build stream objects — each HubCloud ID becomes a stream that plays
-  // through our /api/direct proxy (which resolves HubCloud server-side)
-  const streams = [];
-  let idx = 0;
-  for (const hcId of Array.from(hubcloudIds).slice(0, 5)) {
-    idx++;
-    streams.push({
-      name: `HerumHai · 4KHDHub #${idx}`,
-      description: `Source: 4khdhub.one | HubCloud: ${hcId}\n${title || ''}`,
-      // Route through our /api/direct proxy with the HubCloud URL
-      url: `https://hubcloud.cx/drive/${hcId}`,
-      behaviorHints: {
-        notWebReady: true,
-        filename: `${title || 'stream'}-${idx}.mkv`,
-        proxyHeaders: {
-          request: {
-            'User-Agent': DESKTOP_UA,
-            'Referer': 'https://4khdhub.one/',
-          },
-        },
-        bingeGroup: `herumhai-4khdhub-${hcId}`,
-      },
-    });
-  }
-  return streams;
+  // HubCloud URLs are JS-rendered — can't resolve to CDN URLs without a browser
+  // Return empty array to avoid showing broken streams to users
+  // The xpass.top HLS streams (from scrapeXpass) are the reliable playable sources
+  console.log('[4khdhub.one] skipped — HubCloud URLs require browser to resolve');
+  return [];
 }
 
 // ---------------------------------------------------------------------------

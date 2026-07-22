@@ -388,6 +388,33 @@ export default async function handler(req, res) {
 
     console.log(`[/api/direct/proxy] proxying ${targetUrl.slice(0, 100)}`);
 
+    // ---------------------------------------------------------------------------
+    // HubCloud URL detection — HubCloud drive URLs (hubcloud.cx/drive/ID) are
+    // JS-rendered pages, not direct video URLs. If we just pipe them, Stremio
+    // gets HTML instead of video. We need to resolve them to the actual CDN URL
+    // using the existing resolveHubCloud function.
+    // ---------------------------------------------------------------------------
+    const hubcloudMatch = targetUrl.match(/hubcloud\.(?:ist|cx|club|fans)\/drive\/([a-zA-Z0-9_-]+)/i);
+    if (hubcloudMatch) {
+      const hubcloudId = hubcloudMatch[1];
+      console.log(`[/api/direct/proxy] HubCloud URL detected, resolving ID: ${hubcloudId}`);
+      const resolved = await resolveHubCloud(hubcloudId, referer);
+      if (resolved) {
+        console.log(`[/api/direct/proxy] HubCloud resolved → ${resolved.directUrl.slice(0, 80)}`);
+        const hubcloudHeaders = {
+          'User-Agent': USER_AGENT,
+          'Accept': '*/*',
+          'Accept-Language': 'en-US,en;q=0.9',
+        };
+        if (resolved.referer) hubcloudHeaders['Referer'] = resolved.referer;
+        if (req.headers.range) hubcloudHeaders['Range'] = req.headers.range;
+        return pipeStream(req, res, resolved.directUrl, hubcloudHeaders, 'hubcloud-resolved');
+      }
+      // If resolution fails, return a clear error instead of piping HTML
+      console.log(`[/api/direct/proxy] HubCloud resolution failed for ${hubcloudId}`);
+      return res.status(502).json({ error: 'HubCloud stream could not be resolved (JS-rendered page requires browser)' });
+    }
+
     // Build upstream headers with browser UA + Referer
     const upstreamHeaders = {
       'User-Agent': USER_AGENT,

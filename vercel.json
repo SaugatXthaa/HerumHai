@@ -4,29 +4,86 @@
   "cleanUrls": false,
   "trailingSlash": false,
   "rewrites": [
-    { "source": "/manifest.json", "destination": "/api/manifest" },
-    { "source": "/manifest", "destination": "/api/manifest" },
-    { "source": "/api/manifest.json", "destination": "/api/manifest" },
-
-    { "source": "/stream/:type/:id.json", "destination": "/api/stream?type=:type&id=:id" },
-    { "source": "/stream/:type/:id", "destination": "/api/stream?type=:type&id=:id" },
-    { "source": "/api/stream/:type/:id.json", "destination": "/api/stream?type=:type&id=:id" },
-    { "source": "/api/stream/:type/:id", "destination": "/api/stream?type=:type&id=:id" },
-
-    { "source": "/streams2/:type/:id.json", "destination": "/api/streams2?type=:type&id=:id" },
-    { "source": "/streams2/:type/:id", "destination": "/api/streams2?type=:type&id=:id" },
-    { "source": "/api/streams2/:type/:id.json", "destination": "/api/streams2?type=:type&id=:id" },
-    { "source": "/api/streams2/:type/:id", "destination": "/api/streams2?type=:type&id=:id" },
-
-    { "source": "/streams3/:type/:id.json", "destination": "/api/stream3?type=:type&id=:id" },
-    { "source": "/streams3/:type/:id", "destination": "/api/stream3?type=:type&id=:id" },
-    { "source": "/api/stream3/:type/:id.json", "destination": "/api/stream3?type=:type&id=:id" },
-    { "source": "/api/stream3/:type/:id", "destination": "/api/stream3?type=:type&id=:id" },
-
-    { "source": "/direct/:source/:token/:filename(.+)", "destination": "/api/direct" },
-    { "source": "/api/direct/:source/:token/:filename(.+)", "destination": "/api/direct" },
-
-    { "source": "/health", "destination": "/api/health" }
+    {
+      "source": "/manifest.json",
+      "destination": "/api/manifest"
+    },
+    {
+      "source": "/manifest",
+      "destination": "/api/manifest"
+    },
+    {
+      "source": "/api/manifest.json",
+      "destination": "/api/manifest"
+    },
+    {
+      "source": "/stream/:type/:id.json",
+      "destination": "/api/stream?type=:type&id=:id"
+    },
+    {
+      "source": "/stream/:type/:id",
+      "destination": "/api/stream?type=:type&id=:id"
+    },
+    {
+      "source": "/api/stream/:type/:id.json",
+      "destination": "/api/stream?type=:type&id=:id"
+    },
+    {
+      "source": "/api/stream/:type/:id",
+      "destination": "/api/stream?type=:type&id=:id"
+    },
+    {
+      "source": "/streams2/:type/:id.json",
+      "destination": "/api/streams2?type=:type&id=:id"
+    },
+    {
+      "source": "/streams2/:type/:id",
+      "destination": "/api/streams2?type=:type&id=:id"
+    },
+    {
+      "source": "/api/streams2/:type/:id.json",
+      "destination": "/api/streams2?type=:type&id=:id"
+    },
+    {
+      "source": "/api/streams2/:type/:id",
+      "destination": "/api/streams2?type=:type&id=:id"
+    },
+    {
+      "source": "/streams3/:type/:id.json",
+      "destination": "/api/stream3?type=:type&id=:id"
+    },
+    {
+      "source": "/streams3/:type/:id",
+      "destination": "/api/stream3?type=:type&id=:id"
+    },
+    {
+      "source": "/api/stream3/:type/:id.json",
+      "destination": "/api/stream3?type=:type&id=:id"
+    },
+    {
+      "source": "/api/stream3/:type/:id",
+      "destination": "/api/stream3?type=:type&id=:id"
+    },
+    {
+      "source": "/api/direct/:path(.+)",
+      "destination": "/api/direct"
+    },
+    {
+      "source": "/direct/:path(.+)",
+      "destination": "/api/direct"
+    },
+    {
+      "source": "/direct/:source/:token/:filename(.+)",
+      "destination": "/api/direct"
+    },
+    {
+      "source": "/api/direct/:source/:token/:filename(.+)",
+      "destination": "/api/direct"
+    },
+    {
+      "source": "/health",
+      "destination": "/api/health"
+    }
   ],
   "functions": {
     "api/stream.js": {
@@ -58,10 +115,22 @@
     {
       "source": "/(.*)",
       "headers": [
-        { "key": "Access-Control-Allow-Origin", "value": "*" },
-        { "key": "Access-Control-Allow-Methods", "value": "GET, HEAD, OPTIONS" },
-        { "key": "Access-Control-Allow-Headers", "value": "Content-Type, Range" },
-        { "key": "Access-Control-Expose-Headers", "value": "Content-Length, Content-Range, Accept-Ranges" }
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "*"
+        },
+        {
+          "key": "Access-Control-Allow-Methods",
+          "value": "GET, HEAD, OPTIONS"
+        },
+        {
+          "key": "Access-Control-Allow-Headers",
+          "value": "Content-Type, Range"
+        },
+        {
+          "key": "Access-Control-Expose-Headers",
+          "value": "Content-Length, Content-Range, Accept-Ranges"
+        }
       ]
     }
   ]

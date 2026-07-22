@@ -48,8 +48,6 @@ import {
   parseStremioIdHdHub,
 } from './streams2.js';
 
-// Import xpass.top HTTP scraper (works on Vercel without puppeteer/browser)
-import { scrapeXpass } from './xpass.js';
 // Import multi-source HTTP scraper (xpass + 4khdhub.one + vidsrc.to)
 import { scrapeAllSources } from './multisource.js';
 
