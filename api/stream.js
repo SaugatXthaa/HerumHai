@@ -2331,24 +2331,19 @@ function fillMissingFields(data) {
 }
 
 // ---------------------------------------------------------------------------
-// Default Tamtaro formatter (loaded from public/formatter.json at startup)
+// Default Tamtaro formatter (from AIOStreams BUILTIN_FORMATTER_DEFINITIONS)
 let DEFAULT_NAME_TEMPLATE = null;
 let DEFAULT_DESC_TEMPLATE = null;
 
 async function loadDefaultFormatter() {
   if (DEFAULT_NAME_TEMPLATE) return;
   try {
-    // Try to load from the deployed /formatter.json
-    const protocol = 'https';
-    const host = process.env.VERCEL_URL || 'herum-hai.vercel.app';
-    const resp = await fetch(`https://${host}/formatter.json`, {
-      signal: AbortSignal.timeout(5000),
-    });
-    if (resp.ok) {
-      const fmt = await resp.json();
-      DEFAULT_NAME_TEMPLATE = fmt.name || null;
-      DEFAULT_DESC_TEMPLATE = fmt.description || null;
-      console.log(`[formatter] loaded Tamtaro default from /formatter.json (name=${DEFAULT_NAME_TEMPLATE?.length||0} chars)`);
+    // Import BUILTIN_FORMATTER_DEFINITIONS from the engine (bundled from AIOStreams source)
+    const engine = await import('./formatter-engine.js');
+    if (engine.BUILTIN_FORMATTER_DEFINITIONS?.tamtaro) {
+      DEFAULT_NAME_TEMPLATE = engine.BUILTIN_FORMATTER_DEFINITIONS.tamtaro.name;
+      DEFAULT_DESC_TEMPLATE = engine.BUILTIN_FORMATTER_DEFINITIONS.tamtaro.description;
+      console.log(`[formatter] loaded Tamtaro default from AIOStreams engine (name=${DEFAULT_NAME_TEMPLATE?.length||0} chars)`);
     }
   } catch (e) {
     console.log('[formatter] could not load default Tamtaro formatter:', e.message);

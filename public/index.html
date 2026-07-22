@@ -364,34 +364,47 @@ document.getElementById('copy-btn').onclick = async function() { var u = await b
 // === INIT ===
 (async function init() {
   updateResCount();
-  // Load tamtaro from /formatter.json
-  try {
-    var resp = await fetch('/formatter.json');
-    if (resp.ok) {
-      var fmt = await resp.json();
-      BUILTIN_FORMATTERS.tamtaro.name = fmt.name || '';
-      BUILTIN_FORMATTERS.tamtaro.description = fmt.description || '';
-    }
-  } catch(e) { console.error('Load formatter.json failed:', e); }
-  // Set default
-  var t = BUILTIN_FORMATTERS.tamtaro;
-  document.getElementById('name-template').value = t.name || '';
-  document.getElementById('desc-template').value = t.description || '';
-  document.getElementById('preset-description').textContent = t.desc || '';
-  document.getElementById('preset-select').value = 'tamtaro';
-  updatePresetStatus();
-  updatePreview();
 
-  // Poll for engine availability (module script loads asynchronously)
+  // Wait for the engine to load (it registers on window.__formatterEngine)
   var engineCheckCount = 0;
-  var engineCheckTimer = setInterval(function() {
+  var engineReady = false;
+  var checkEngine = function() {
     engineCheckCount++;
-    if (window.__formatterEngine || engineCheckCount > 30) {
-      clearInterval(engineCheckTimer);
+    if (window.__formatterEngine) {
+      engineReady = true;
+      // Load ALL presets from the engine's BUILTIN_FORMATTER_DEFINITIONS
+      var builtins = window.__formatterEngine.BUILTIN_FORMATTER_DEFINITIONS;
+      if (builtins) {
+        for (var key in builtins) {
+          if (BUILTIN_FORMATTERS[key]) {
+            BUILTIN_FORMATTERS[key].name = builtins[key].name || '';
+            BUILTIN_FORMATTERS[key].description = builtins[key].description || '';
+          }
+        }
+      }
+      // Set default to tamtaro (from the EXACT AIOStreams source)
+      var t = BUILTIN_FORMATTERS.tamtaro;
+      document.getElementById('name-template').value = t.name || '';
+      document.getElementById('desc-template').value = t.description || '';
+      document.getElementById('preset-description').textContent = t.desc || '';
+      document.getElementById('preset-select').value = 'tamtaro';
+      updatePresetStatus();
       _engine = null; // force reload from window
-      updatePreview(); // re-render now that engine is available
+      updatePreview();
+      return true;
     }
-  }, 200);
+    if (engineCheckCount > 30) {
+      // Timeout — use fallback /formatter.json
+      return true;
+    }
+    return false;
+  };
+
+  if (!checkEngine()) {
+    var timer = setInterval(function() {
+      if (checkEngine()) clearInterval(timer);
+    }, 200);
+  }
 })();
 </script>
 </body>
