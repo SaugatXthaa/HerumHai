@@ -233,17 +233,138 @@ async function scrapeXpass(target, title) {
 
 // ---------------------------------------------------------------------------
 // Source 2: 4khdhub.one — WordPress site with HubCloud embed links
-// NOTE: HubCloud drive URLs are JS-rendered and cannot be resolved without
-// a browser. The HubCloud streams are SKIPPED because they would return HTML
-// instead of video when played through our proxy.
-// This source is disabled until we have a browser-based resolver.
+// Resolves HubCloud IDs via sportverse.cc to direct CDN URLs (workers.dev)
+//
+// Resolution chain:
+//   1. Search 4khdhub.one → find detail page links
+//   2. Fetch detail page → extract HubCloud drive IDs
+//   3. For each ID: hubcloud.cx/drive/ID → extract sportverse.cc resolver URL
+//   4. sportverse.cc resolver page → extract workers.dev CDN URL
+//   5. Test CDN URL → return as stream (marked ⬇️ for download since CDN
+//      returns ZIP-compressed MKV that Stremio can't stream but can download)
+//
+// NOTE: The workers.dev CDN returns ZIP-compressed files (content-type: application/x-zip)
+// Stremio's ffmpeg player can't stream ZIP files, but they CAN be downloaded.
+// Streams are prefixed with ⬇️ to indicate download-only.
+// Most files also return 403 (GDrive quota exceeded) — only ~1 in 7 works at any given time.
 // ---------------------------------------------------------------------------
 async function scrape4khdhubOne(target, title) {
-  // HubCloud URLs are JS-rendered — can't resolve to CDN URLs without a browser
-  // Return empty array to avoid showing broken streams to users
-  // The xpass.top HLS streams (from scrapeXpass) are the reliable playable sources
-  console.log('[4khdhub.one] skipped — HubCloud URLs require browser to resolve');
-  return [];
+  if (!title) return [];
+
+  // Step 1: Search 4khdhub.one
+  const searchUrl = `https://4khdhub.one/?s=${encodeURIComponent(title)}`;
+  console.log(`[4khdhub.one] searching: ${searchUrl}`);
+  const searchHtml = curl(searchUrl, { ua: DESKTOP_UA, timeout: 8 });
+  if (!searchHtml) return [];
+
+  // Find detail page links
+  const detailLinks = new Set();
+  const skipExtensions = ['.png', '.svg', '.ico', '.jpg', '.jpeg', '.gif', '.webp', '.css', '.js', '.json', '.xml', '.webmanifest'];
+  const skipPrefixes = ['/images/', '/css/', '/js/', '/category/', '/tag/', '/page/', '/wp-', '/author/', '/feed', '/comments', '/about', '/contact', '/dmca', '/privacy'];
+
+  for (const m of searchHtml.matchAll(/href="(https?:\/\/4khdhub\.one\/[^"]+)"/g)) {
+    const link = m[1];
+    if (skipExtensions.some(ext => link.endsWith(ext))) continue;
+    if (skipPrefixes.some(p => link.includes(p))) continue;
+    if (link.includes('/?s=') || link === 'https://4khdhub.one/') continue;
+    detailLinks.add(link);
+  }
+  for (const m of searchHtml.matchAll(/href="(\/[^"]+)"/g)) {
+    const link = m[1];
+    if (skipExtensions.some(ext => link.endsWith(ext))) continue;
+    if (skipPrefixes.some(p => link.startsWith(p))) continue;
+    if (link === '/' || link.startsWith('/?')) continue;
+    if (!/\/[a-z0-9-]+\/?$/i.test(link)) continue;
+    detailLinks.add(`https://4khdhub.one${link}`);
+  }
+
+  if (detailLinks.size === 0) {
+    console.log('[4khdhub.one] no detail links found');
+    return [];
+  }
+
+  console.log(`[4khdhub.one] found ${detailLinks.size} detail links`);
+
+  // Step 2: Fetch detail pages and extract HubCloud IDs
+  const hubcloudIds = new Set();
+  for (const link of Array.from(detailLinks).slice(0, 3)) {
+    const detailHtml = curl(link, { ua: DESKTOP_UA, referer: 'https://4khdhub.one/', timeout: 10 });
+    if (!detailHtml) continue;
+    for (const m of detailHtml.matchAll(/hubcloud\.(?:ist|cx|club|fans)\/drive\/([a-zA-Z0-9_-]+)/gi)) {
+      hubcloudIds.add(m[1]);
+    }
+  }
+
+  if (hubcloudIds.size === 0) {
+    console.log('[4khdhub.one] no HubCloud IDs found');
+    return [];
+  }
+
+  console.log(`[4khdhub.one] found ${hubcloudIds.size} HubCloud IDs, resolving via sportverse.cc...`);
+
+  // Step 3-5: Resolve each HubCloud ID via sportverse.cc
+  const streams = [];
+  let idx = 0;
+  for (const hcId of Array.from(hubcloudIds).slice(0, 7)) {
+    idx++;
+    try {
+      // Step 3: Get sportverse.cc resolver URL from hubcloud.cx page
+      const hcHtml = curl(`https://hubcloud.cx/drive/${hcId}`, { ua: DESKTOP_UA, timeout: 6 });
+      if (!hcHtml) continue;
+      const resolverMatch = hcHtml.match(/var url = '([^']+)'/);
+      if (!resolverMatch) continue;
+      const resolverUrl = resolverMatch[1];
+
+      // Step 4: Fetch sportverse.cc page and extract workers.dev CDN URL
+      const sportverseHtml = curl(resolverUrl, { ua: DESKTOP_UA, referer: 'https://hubcloud.cx/', timeout: 8 });
+      if (!sportverseHtml) continue;
+
+      // Find workers.dev URL in the page
+      const workersIdx = sportverseHtml.indexOf('workers.dev');
+      if (workersIdx < 0) continue;
+      const hrefStart = sportverseHtml.lastIndexOf('href="', workersIdx);
+      if (hrefStart < 0) continue;
+      const urlStart = hrefStart + 6;
+      const urlEnd = sportverseHtml.indexOf('"', urlStart);
+      const cdnUrl = sportverseHtml.substring(urlStart, urlEnd)
+        .replace(/ /g, '%20')
+        .replace(/\[/g, '%5B')
+        .replace(/\]/g, '%5D');
+
+      if (!cdnUrl || !cdnUrl.startsWith('https://')) continue;
+
+      // Step 5: Test the CDN URL (8s timeout — workers.dev can be slow)
+      const code = checkUrl(cdnUrl, 8);
+      if (!['200', '206'].includes(code)) {
+        console.log(`[4khdhub.one] #${idx} ${hcId}: HTTP ${code} — skipping (quota exceeded)`);
+        continue;
+      }
+
+      console.log(`[4khdhub.one] #${idx} ${hcId}: ✓ HTTP ${code} — added as download stream`);
+
+      // Mark as download (⬇️) since CDN returns ZIP-compressed MKV
+      streams.push({
+        name: `⬇️ HerumHai · 4KHDHub #${idx}`,
+        description: `Source: 4khdhub.one | HubCloud: ${hcId} | Download (ZIP/MKV)\n${title || ''}`,
+        url: cdnUrl,
+        behaviorHints: {
+          notWebReady: true,
+          filename: `${title || 'stream'}-${idx}.mkv`,
+          proxyHeaders: {
+            request: {
+              'User-Agent': DESKTOP_UA,
+            },
+          },
+          bingeGroup: `herumhai-4khdhub-${hcId}`,
+        },
+      });
+    } catch (e) {
+      console.log(`[4khdhub.one] #${idx} ${hcId}: error — ${e.message}`);
+    }
+  }
+
+  console.log(`[4khdhub.one] resolved ${streams.length}/${hubcloudIds.size} HubCloud streams`);
+  return streams;
 }
 
 // ---------------------------------------------------------------------------
