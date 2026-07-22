@@ -76,41 +76,35 @@ function checkUrl(url, timeout = 5) {
 
 // ---------------------------------------------------------------------------
 // TMDB ID resolution — xpass.top requires TMDB IDs for TV/Anime
+// Uses curl (not fetch) for reliability on Vercel serverless
 // ---------------------------------------------------------------------------
-async function resolveTmdbId(imdbId, type, title) {
-  if (!imdbId && !title) return null;
+function resolveTmdbId(imdbId, type, title) {
+  const kind = type === 'movie' ? 'movie' : 'tv';
 
   // Method 1: IMDb → TMDB via /find endpoint
   if (imdbId) {
-    try {
-      const kind = type === 'movie' ? 'movie' : 'tv';
-      const url = `https://api.themoviedb.org/3/find/${imdbId}?api_key=${TMDB_API_KEY}&external_source=imdb_id`;
-      const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
-      if (res.ok) {
-        const data = await res.json();
-        const arr = data?.[`${kind}_results`] || [];
-        if (arr[0]?.id) {
-          console.log(`[tmdb] ${imdbId} → ${arr[0].id} (${arr[0].title || arr[0].name})`);
-          return String(arr[0].id);
-        }
+    const url = `https://api.themoviedb.org/3/find/${imdbId}?api_key=${TMDB_API_KEY}&external_source=imdb_id`;
+    const data = curlJson(url, { timeout: 6 });
+    if (data) {
+      const arr = data?.[`${kind}_results`] || [];
+      if (arr[0]?.id) {
+        console.log(`[tmdb] ${imdbId} → ${arr[0].id} (${arr[0].title || arr[0].name})`);
+        return String(arr[0].id);
       }
-    } catch {}
+    }
   }
 
   // Method 2: Title → TMDB via search
   if (title) {
-    try {
-      const kind = type === 'movie' ? 'movie' : 'tv';
-      const url = `https://api.themoviedb.org/3/search/${kind}?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(title)}`;
-      const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.results?.[0]?.id) {
-          console.log(`[tmdb] "${title}" → ${data.results[0].id} (${data.results[0].title || data.results[0].name})`);
-          return String(data.results[0].id);
-        }
-      }
-    } catch {}
+    // Strip year from title for better search results
+    // (resolveTitle returns "Title YYYY" but TMDB search works better with just "Title")
+    const cleanTitle = title.replace(/\s+\d{4}$/, '').trim();
+    const url = `https://api.themoviedb.org/3/search/${kind}?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(cleanTitle)}`;
+    const data = curlJson(url, { timeout: 6 });
+    if (data?.results?.[0]?.id) {
+      console.log(`[tmdb] "${cleanTitle}" → ${data.results[0].id} (${data.results[0].title || data.results[0].name})`);
+      return String(data.results[0].id);
+    }
   }
 
   return null;
@@ -127,35 +121,32 @@ async function scrapeXpass(target, title) {
     // Movies use IMDb ID directly
     embedUrl = `https://play.xpass.top/e/movie/${imdbId}`;
   } else if (type === 'series' && imdbId) {
-    // Series need TMDB ID — resolve IMDb → TMDB
-    const tmdbId = await resolveTmdbId(imdbId, 'series', title);
+    // Series need TMDB ID — resolve IMDb → TMDB using curl (not fetch)
+    const tmdbId = resolveTmdbId(imdbId, 'series', title);
     if (!tmdbId) {
       console.log(`[xpass] could not resolve TMDB ID for series ${imdbId}`);
       return [];
     }
     embedUrl = `https://play.xpass.top/e/tv/${tmdbId}/${season || 1}/${episode || 1}`;
   } else if (type === 'anime') {
-    // Anime needs TMDB ID — resolve from kitsu/title
+    // Anime needs TMDB ID — resolve from kitsu/title using curl
     let tmdbId = null;
     if (imdbId) {
-      tmdbId = await resolveTmdbId(imdbId, 'anime', title);
+      tmdbId = resolveTmdbId(imdbId, 'anime', title);
     }
     if (!tmdbId && title) {
-      tmdbId = await resolveTmdbId(null, 'anime', title);
+      tmdbId = resolveTmdbId(null, 'anime', title);
     }
     if (!tmdbId && kitsuId) {
-      // Get title from kitsu, then search TMDB
-      try {
-        const kitsuRes = await fetch(`https://kitsu.io/api/edge/anime/${kitsuId}`, { signal: AbortSignal.timeout(8000) });
-        if (kitsuRes.ok) {
-          const kitsuData = await kitsuRes.json();
-          const kitsuTitle = kitsuData?.data?.attributes?.canonicalTitle;
-          if (kitsuTitle) {
-            console.log(`[kitsu] ${kitsuId} → "${kitsuTitle}"`);
-            tmdbId = await resolveTmdbId(null, 'anime', kitsuTitle);
-          }
+      // Get title from kitsu API via curl, then search TMDB
+      const kitsuData = curlJson(`https://kitsu.io/api/edge/anime/${kitsuId}`, { timeout: 6 });
+      if (kitsuData) {
+        const kitsuTitle = kitsuData?.data?.attributes?.canonicalTitle;
+        if (kitsuTitle) {
+          console.log(`[kitsu] ${kitsuId} → "${kitsuTitle}"`);
+          tmdbId = resolveTmdbId(null, 'anime', kitsuTitle);
         }
-      } catch {}
+      }
     }
     if (!tmdbId) {
       console.log(`[xpass] could not resolve TMDB ID for anime ${kitsuId || imdbId}`);
@@ -185,11 +176,11 @@ async function scrapeXpass(target, title) {
 
   console.log(`[xpass] found ${playlistPaths.size} playlists`);
 
-  // Fetch playlists and collect m3u8 URLs
+  // Fetch playlists — limit to 8 for speed (was 15)
   const allSources = [];
-  for (const path of Array.from(playlistPaths).slice(0, 15)) {
+  for (const path of Array.from(playlistPaths).slice(0, 8)) {
     const url = path.startsWith('http') ? path : `https://play.xpass.top${path}`;
-    const data = curlJson(url, { referer: embedUrl, timeout: 6 });
+    const data = curlJson(url, { referer: embedUrl, timeout: 5 });
     if (!data?.playlist?.[0]?.sources) continue;
     for (const s of data.playlist[0].sources) {
       if (s.file && !s.file.includes('/video/error')) {
@@ -198,16 +189,16 @@ async function scrapeXpass(target, title) {
     }
   }
 
-  console.log(`[xpass] collected ${allSources.length} sources, testing...`);
+  console.log(`[xpass] collected ${allSources.length} sources, testing in parallel...`);
 
-  // Test each m3u8 URL (parallel, 5s timeout each)
-  const working = [];
-  for (const src of allSources) {
-    const code = checkUrl(src.file, 4);
-    if (['200', '206', '302', '307'].includes(code)) {
-      working.push(src);
-    }
-  }
+  // Test each m3u8 URL IN PARALLEL (was sequential — caused Vercel timeouts)
+  const testResults = await Promise.all(
+    allSources.map(async (src) => ({
+      ...src,
+      working: ['200', '206', '302', '307'].includes(checkUrl(src.file, 5)),
+    }))
+  );
+  const working = testResults.filter(s => s.working);
   console.log(`[xpass] ${working.length} working sources`);
 
   // Build stream objects (dedupe by URL)
