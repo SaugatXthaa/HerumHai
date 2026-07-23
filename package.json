@@ -1,15 +1,18 @@
 {
-  "name": "herumhai",
-  "version": "1.0.0",
-  "private": true,
+  "name": "herumhai-pengu",
+  "version": "9.0.0",
+  "description": "HerumHai — Pure HTTP PenguPlay-style Stremio addon (38+ API sources, no browser)",
+  "main": "server.js",
   "type": "module",
-  "description": "HerumHai — Real-time Stremio/Nuvio stream addon optimized for Vercel Serverless Deployment.",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "dev": "node --watch server.js"
   },
   "dependencies": {
-    "@sparticuz/chromium": "^127.0.0",
-    "puppeteer-core": "^23.4.0"
+    "axios": "^1.7.9",
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "p-limit": "^6.1.0"
   },
   "engines": {
     "node": ">=20.0.0"

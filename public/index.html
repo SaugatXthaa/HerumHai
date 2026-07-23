@@ -1,411 +1,251 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>HerumHai — Stremio Addon Configurator</title>
-<link rel="icon" href="/logo.png" />
-<script src="https://cdn.tailwindcss.com"></script>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<script type="module" src="/formatter-engine.js"></script>
-<style>
-  * { font-family: 'Inter', system-ui, sans-serif; }
-  .font-mono { font-family: 'JetBrains Mono', monospace; }
-  ::-webkit-scrollbar { width: 6px; height: 6px; }
-  ::-webkit-scrollbar-track { background: #0a0a0a; }
-  ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
-  ::-webkit-scrollbar-thumb:hover { background: #555; }
-  textarea { white-space: pre-wrap; word-break: break-all; overflow-wrap: break-word; }
-  .preview-name { white-space: pre; overflow-x: auto; font-family: 'JetBrains Mono', monospace; }
-  .preview-desc { white-space: pre; overflow-x: auto; font-family: 'JetBrains Mono', monospace; }
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HerumHai — PenguPlay Engine</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0a0e1a;
+      color: #e0e0e0;
+      min-height: 100vh;
+      padding: 20px;
+    }
+    .container { max-width: 900px; margin: 0 auto; }
+    h1 {
+      background: linear-gradient(135deg, #00d4ff, #0066ff);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      font-size: 2.5em;
+      margin-bottom: 10px;
+    }
+    .subtitle { color: #888; margin-bottom: 30px; font-size: 1.1em; }
+    .card {
+      background: #131826;
+      border: 1px solid #1e2538;
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 20px;
+    }
+    .card h2 { color: #00d4ff; margin-bottom: 16px; font-size: 1.3em; }
+    .install-btn {
+      display: inline-block;
+      background: linear-gradient(135deg, #00d4ff, #0066ff);
+      color: #0a0e1a;
+      padding: 14px 32px;
+      border-radius: 8px;
+      text-decoration: none;
+      font-weight: bold;
+      font-size: 1.1em;
+      transition: transform 0.2s;
+    }
+    .install-btn:hover { transform: translateY(-2px); }
+    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; }
+    .stat-box {
+      background: #0a0e1a;
+      border-radius: 8px;
+      padding: 16px;
+      text-align: center;
+    }
+    .stat-value { font-size: 2em; font-weight: bold; color: #00d4ff; }
+    .stat-label { color: #888; font-size: 0.85em; margin-top: 5px; }
+    .source-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; }
+    .source-item {
+      background: #0a0e1a;
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 0.85em;
+      border-left: 3px solid #00d4ff;
+    }
+    .test-input {
+      width: 100%;
+      padding: 12px;
+      background: #0a0e1a;
+      border: 1px solid #1e2538;
+      border-radius: 8px;
+      color: #e0e0e0;
+      font-size: 1em;
+      margin-bottom: 10px;
+    }
+    .test-btn {
+      background: #00d4ff;
+      color: #0a0e1a;
+      padding: 10px 24px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 1em;
+      font-weight: bold;
+    }
+    .test-btn:hover { background: #0066ff; color: #fff; }
+    #test-result {
+      margin-top: 15px;
+      padding: 12px;
+      background: #0a0e1a;
+      border-radius: 8px;
+      font-family: monospace;
+      font-size: 0.9em;
+      max-height: 300px;
+      overflow-y: auto;
+      display: none;
+      white-space: pre-wrap;
+    }
+    .info { color: #888; line-height: 1.6; }
+    .info strong { color: #00d4ff; }
+    .badge {
+      display: inline-block;
+      background: #00d4ff22;
+      color: #00d4ff;
+      padding: 4px 10px;
+      border-radius: 4px;
+      font-size: 0.8em;
+      margin: 2px;
+    }
+  </style>
 </head>
-<body class="min-h-screen bg-[#0a0a0a] text-white py-8 px-4 sm:px-6 lg:px-8">
-<div class="max-w-3xl mx-auto space-y-6">
+<body>
+  <div class="container">
+    <h1>HerumHai</h1>
+    <p class="subtitle">PenguPlay-style pure HTTP engine · 35 sources · p-limit(20) concurrency · ~30MB RAM</p>
 
-  <!-- Header -->
-  <header class="flex items-center justify-between border-b border-[#222] pb-6">
-    <div class="flex items-center gap-3">
-      <div class="bg-white p-1 rounded-xl w-10 h-10 flex items-center justify-center shrink-0">
-        <img src="/logo.png" alt="HerumHai" class="w-full h-full object-contain rounded-lg" referrerPolicy="no-referrer" />
-      </div>
-      <div>
-        <h1 class="text-xl font-bold">HerumHai</h1>
-        <p class="text-xs text-gray-500">Stremio Addon Configurator</p>
-      </div>
-    </div>
-    <button onclick="resetDefaults()" class="text-xs text-gray-400 hover:text-white bg-[#1a1a1a] border border-[#333] px-3 py-2 rounded-lg cursor-pointer">Reset</button>
-  </header>
-
-  <!-- Resolutions -->
-  <div class="bg-[#111] border border-[#222] rounded-lg p-5">
-    <div class="flex justify-between items-center mb-4">
-      <h2 class="text-base font-semibold">Resolutions</h2>
-      <span class="text-xs text-gray-400 font-mono" id="res-count">6/6 selected</span>
-    </div>
-    <div class="grid grid-cols-3 sm:grid-cols-6 gap-2" id="res-grid"></div>
-  </div>
-
-  <!-- Formatter (AIOStreams clone) -->
-  <div class="bg-[#111] border border-[#222] rounded-lg p-5 space-y-5">
-    <div>
-      <h2 class="text-2xl font-bold">Formatter</h2>
-      <p class="text-sm text-gray-400 mt-1">Format your streams to your liking.</p>
-    </div>
-
-    <!-- Formatter Selection Card -->
-    <div class="bg-[#0a0a0a] border border-[#222] rounded-lg p-4 space-y-3">
-      <div>
-        <h3 class="text-xs font-semibold uppercase tracking-wider text-gray-300">Formatter Selection</h3>
-        <p class="text-sm text-gray-500 mt-1">Choose how your streams should be formatted</p>
-      </div>
-
-      <div class="flex items-center gap-3">
-        <select id="preset-select" class="flex-1 bg-[#000] border border-[#333] text-sm text-white rounded-lg px-3 py-2.5 focus:outline-none cursor-pointer">
-          <option value="tamtaro">Tamtaro</option>
-          <option value="gdrive">Google Drive</option>
-          <option value="prism">Prism</option>
-          <option value="lightgdrive">Light Google Drive</option>
-          <option value="minimalisticgdrive">Minimalistic</option>
-          <option value="torrentio">Torrentio</option>
-          <option value="torbox">Torbox</option>
-          <option value="custom">Custom</option>
-        </select>
-        <span id="preset-status" class="text-xs font-medium px-2.5 py-1 rounded-full border bg-green-900/40 text-green-400 border-green-600/30 whitespace-nowrap">Using built-in</span>
-      </div>
-
-      <p id="preset-description" class="text-sm text-gray-400"></p>
-    </div>
-
-    <!-- Templates -->
-    <div class="space-y-4">
-      <p class="text-sm text-gray-400">
-        Type <span class="font-mono text-indigo-400 bg-indigo-950/30 px-1.5 py-0.5 rounded">{debug.jsonf}</span> to see all available variables.
+    <div class="card">
+      <h2>📦 Install in Stremio</h2>
+      <p class="info" style="margin-bottom: 15px;">
+        Click to install. The addon supports movies, series, and anime.
       </p>
+      <a href="#" id="install-link" class="install-btn">Install HerumHai</a>
+    </div>
 
-      <!-- Name Template -->
-      <div>
-        <label class="text-sm font-medium mb-2 block">Name Template</label>
-        <textarea id="name-template" spellcheck="false" style="min-height:80px;" class="w-full bg-[#000] border border-[#333] rounded-lg p-3 text-xs font-mono text-gray-200 focus:outline-none focus:border-indigo-600 resize-y" placeholder="Enter a template for the stream name"></textarea>
-      </div>
-
-      <!-- Description Template -->
-      <div>
-        <label class="text-sm font-medium mb-2 block">Description Template</label>
-        <textarea id="desc-template" spellcheck="false" style="min-height:140px;" class="w-full bg-[#000] border border-[#333] rounded-lg p-3 text-xs font-mono text-gray-200 focus:outline-none focus:border-indigo-600 resize-y" placeholder="Enter a template for the stream description"></textarea>
-      </div>
-
-      <!-- Action buttons -->
-      <div class="flex items-center gap-2">
-        <button onclick="toggleSnippets()" class="px-3 py-2 bg-[#1a1a1a] hover:bg-[#2a2a2a] border border-[#333] text-xs text-gray-300 rounded-lg cursor-pointer">Snippets</button>
-        <input type="file" id="file-input" accept=".json" class="hidden" />
-        <button onclick="document.getElementById('file-input').click()" class="px-3 py-2 bg-[#1a1a1a] hover:bg-[#2a2a2a] border border-[#333] text-xs text-gray-300 rounded-lg cursor-pointer">Import</button>
-        <button onclick="exportConfig()" class="px-3 py-2 bg-[#1a1a1a] hover:bg-[#2a2a2a] border border-[#333] text-xs text-gray-300 rounded-lg cursor-pointer">Export</button>
-      </div>
-
-      <!-- Snippets -->
-      <div id="snippets-panel" class="hidden bg-[#0a0a0a] border border-[#222] rounded-lg p-3">
-        <div class="flex flex-wrap gap-1.5" id="snippets-row"></div>
+    <div class="card">
+      <h2>📊 Server Status</h2>
+      <div class="stats" id="stats">
+        <div class="stat-box"><div class="stat-value" id="cache-size">—</div><div class="stat-label">Cached Titles</div></div>
+        <div class="stat-box"><div class="stat-value" id="total-streams">—</div><div class="stat-label">Total Streams Cached</div></div>
+        <div class="stat-box"><div class="stat-value" id="mem-usage">—</div><div class="stat-label">Memory (RSS)</div></div>
+        <div class="stat-box"><div class="stat-value" id="uptime">—</div><div class="stat-label">Uptime</div></div>
       </div>
     </div>
 
-    <!-- Preview -->
-    <div>
-      <div class="text-xs font-bold uppercase tracking-widest text-gray-500 mb-2">Preview</div>
-      <p class="text-sm text-gray-500 mb-3">See how your streams would be formatted based on controllable variables</p>
-      <div class="bg-[#0d0d0d] border border-[#222] rounded-lg p-4">
-        <div id="preview-content" class="space-y-1">
-          <div class="preview-name text-xl font-bold text-white"></div>
-          <div class="preview-desc text-base text-gray-400"></div>
-        </div>
-        <div id="preview-status" class="text-[10px] text-gray-600 mt-3"></div>
-      </div>
+    <div class="card">
+      <h2>🎬 Test Stream</h2>
+      <p class="info" style="margin-bottom: 10px;">Enter an IMDb ID to test (first request returns [], streams cached after ~2s):</p>
+      <input type="text" class="test-input" id="test-id" placeholder="e.g., tt1375666 (Inception) or tt0903747:1:1 (Breaking Bad S1E1)">
+      <select class="test-input" id="test-type">
+        <option value="movie">Movie</option>
+        <option value="series">Series</option>
+        <option value="anime">Anime</option>
+      </select>
+      <button class="test-btn" onclick="testStream()">Test Stream</button>
+      <button class="test-btn" style="background:#0066ff;color:#fff;margin-left:10px;" onclick="testStream(true)">Force Refresh</button>
+      <div id="test-result"></div>
+    </div>
+
+    <div class="card">
+      <h2>📋 Sources (35)</h2>
+      <div class="source-list" id="sources"></div>
+    </div>
+
+    <div class="card">
+      <h2>ℹ️ How It Works</h2>
+      <p class="info">
+        <strong>Background Caching:</strong> First request returns <code>{"streams":[]}</code> instantly (&lt;10ms) and triggers
+        a background scrape of all 35 sources with p-limit(20) concurrency. Refresh after 2-3 seconds → streams appear from cache (&lt;50ms).
+      </p>
+      <br>
+      <p class="info">
+        <strong>Pure HTTP:</strong> No Puppeteer, no Playwright, no FlareSolverr. All sources are scraped via axios
+        with randomized browser headers (User-Agent, Accept-Language, Referer rotated per request).
+      </p>
+      <br>
+      <p class="info">
+        <strong>URL Validation:</strong> Every stream URL is validated — only 200/206 with video content-type pass.
+        This eliminates all MPV "unrecognized file format" errors.
+      </p>
+      <br>
+      <p class="info">
+        <strong>Memory Footprint:</strong> ~30MB total (pure HTTP = ~0MB per request). 20 concurrent requests
+        use less memory than a single Puppeteer tab. Perfect for 512MB SnapDeploy free tier.
+      </p>
     </div>
   </div>
 
-  <!-- Install -->
-  <div class="bg-[#111] border border-[#222] rounded-lg p-5">
-    <div class="flex flex-wrap gap-3">
-      <button id="install-btn" class="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm cursor-pointer">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
-        Install in Stremio
-      </button>
-      <button id="copy-btn" class="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[#1a1a1a] border border-[#333] text-gray-300 font-semibold text-sm hover:bg-[#2a2a2a] cursor-pointer">
-        Copy Addon URL
-      </button>
-    </div>
-  </div>
+  <script>
+    const host = window.location.origin;
+    document.getElementById('install-link').href = `stremio://${host.replace('https://', '').replace('http://', '')}/manifest.json`;
 
-  <footer class="border-t border-[#222] pt-4 text-center text-xs text-gray-600">
-    Powered by <span class="text-indigo-400 font-semibold">HerumHai Addons</span>
-  </footer>
-</div>
+    const sources = [
+      'xpass.top', 'databasegda.com', 'mflix.com.de', 'gomo.to', 'vidsrc.win',
+      'vidsrc.to', 'vidsrc.xyz', 'vidsrc.me', 'vidsrc.cc', 'vidsrc.net',
+      'vidsrc.vip', 'vidsrc.pro', 'vidsrc.stream', '2embed.cc', '2embed.to',
+      '2embed.pro', '2embed.rs', 'vidlink.pro', 'vidfast.pro', 'embed.su',
+      'multiembed.mov', 'autoembed.cc', 'smashystream',
+      '4khdhub.one', '4khdhub.fans', 'uhdmovies.casa', 'hdhub4u.tax', 'moviesmod.chat',
+      'moviesdrive.city', 'cinefreak.net', 'allmovieland.one', 'vegamovie.sn',
+      'worldfree4u.dog', 'moviescounter.boston', 'nima4k.org'
+    ];
+    document.getElementById('sources').innerHTML = sources.map(s => `<div class="source-item">${s}</div>`).join('');
 
-<script>
-// === RESOLUTIONS ===
-const RESOLUTIONS = [
-  { id: '4K', key: 'res_2160', selected: true },
-  { id: '2K', key: 'res_1440', selected: true },
-  { id: '1080p', key: 'res_1080', selected: true },
-  { id: '720p', key: 'res_720', selected: true },
-  { id: '480p', key: 'res_480', selected: true },
-  { id: '360p', key: 'res_360', selected: true },
-];
+    async function updateStats() {
+      try {
+        const res = await fetch('/health');
+        const data = await res.json();
+        document.getElementById('cache-size').textContent = data.cache?.size || 0;
+        document.getElementById('mem-usage').textContent = data.memory?.rss || '—';
+        const uptimeMin = Math.floor(data.uptime / 60);
+        document.getElementById('uptime').textContent = uptimeMin < 60 ? uptimeMin + 'm' : Math.floor(uptimeMin/60) + 'h';
 
-const resGrid = document.getElementById('res-grid');
-RESOLUTIONS.forEach(function(r) {
-  var btn = document.createElement('button');
-  btn.className = 'p-2 rounded-lg border text-center text-xs font-bold cursor-pointer transition-all ' + (r.selected ? 'bg-indigo-900/40 border-indigo-600 text-white' : 'bg-[#0a0a0a] border-[#333] text-gray-500');
-  btn.textContent = r.id;
-  btn.onclick = function() {
-    r.selected = !r.selected;
-    btn.className = 'p-2 rounded-lg border text-center text-xs font-bold cursor-pointer transition-all ' + (r.selected ? 'bg-indigo-900/40 border-indigo-600 text-white' : 'bg-[#0a0a0a] border-[#333] text-gray-500');
-    updateResCount();
-  };
-  resGrid.appendChild(btn);
-});
-
-function updateResCount() {
-  var sel = RESOLUTIONS.filter(function(r) { return r.selected; }).length;
-  document.getElementById('res-count').textContent = sel + '/' + RESOLUTIONS.length + ' selected';
-}
-
-// === FORMATTER PRESETS (cloned from AIOStreams) ===
-const BUILTIN_FORMATTERS = {
-  tamtaro: { name: '', description: '', desc: "From Tamtaro's setup. Smartly detects status for cached (\u26a1/\u23f3), proxied (\u26b6/\u26c1), library (\u2601/\u270e), season packs (\u2756/\u25c8) and HDR/DV (\u2726/\u2727). The last line in \u1d04\u1d00\u1d0d\u1d0c\u1d0c \u0284\u1d00\u1d18\u1d18 displays your preferred language options, Usenet's health (\u2611 \u1d04\u028b), SeaDex (\u1d00\u029f\u1d1b/\u0299\u1d07\u1d62\u1d04 \u0280\u1d07\u029f\u1d07\u1d00\u1d22\u1d07), networks, special editions and attributes via ranked stream expressions." },
-  gdrive: { name: '{stream.proxied::istrue["\uD83D\uDC75 "||""]}{stream.private::istrue["\uD83D\uDD11 "||""]}{stream.type::=p2p["[P2P] "||""]}{?[{service.shortName}?}{service.cached::istrue["\u26A1] "||""]}{service.cached::isfalse["\u23F3] "||""]}{addon.name}{stream.library::istrue[" (Your Media)"||""]} {?{stream.resolution}?}', description: '{?\uD83C\uDFA5 {stream.quality} ?}{?\uD83C\uDF9E\uFE0F {stream.encode} ?}{?\uD83C\uDFF7\uFE0F {stream.releaseGroup} ?}{?\uD83D\uDCE1 {stream.network} ?}\n{?\uD83D\uDCFA {stream.visualTags::join(\' | \')} ?}{?\uD83C\uDFA7 {stream.audioTags::join(\' | \')} ?}{?\uD83D\uDD0A {stream.audioChannels::join(\' | \')}?}\n{stream.size::>0["\uD83D\uDCE6 {stream.size::sbytes} "||""]}{stream.folderSize::>0["/ {stream.folderSize::sbytes} "||""]}{stream.bitrate::>0["({stream.bitrate::sbitrate})"||""]}{stream.duration::>0["\u23F1\uFE0F {stream.duration::time} "||""]}{stream.seeders::>0["\uD83D\uDC65 {stream.seeders} "||""]}{?\uD83D\uDCC5 {stream.age} ?}{?\uD83D\uDD0D {stream.indexer}?}\n{?\uD83C\uDF0E {stream.languages::join(\' | \')}?}{?\uD83D\uDCDD {stream.subtitles::join(\' | \')}?}\n{stream.filename::exists["\uD83D\uDCC1"||""]} {?{stream.folderName}/?}{?{stream.filename}?}\n{?\u2139\uFE0F {stream.message}?}', desc: 'Uses the formatting from the Stremio GDrive addon' },
-  prism: { name: '{stream.resolution::exists["{stream.resolution::replace(\'2160p\', \'\uD83D\uDD254K UHD\')::replace(\'1440p\',\'\u2728 QHD\')::replace(\'1080p\',\'\uD83D\uDE80 FHD\')::replace(\'720p\',\'\uD83D\uDCBF HD\')}"||"\uD83D\uDCA9 Unknown"]}', description: '', desc: 'An aesthetic formatter with every detail within 5 lines.' },
-  lightgdrive: { name: '', description: '', desc: 'A lighter version of the GDrive formatter' },
-  minimalisticgdrive: { name: '', description: '', desc: 'A minimalistic formatter which shows only the bare minimum' },
-  torrentio: { name: '{addon.name} {stream.resolution::exists["{stream.resolution}"||"Unknown"]}\n{?{stream.visualTags::join(" | ")}?}', description: '{stream.size::>0["\uD83D\uDCBE{stream.size::sbytes} "||""]}{stream.seeders::>=0["\uD83D\uDC64{stream.seeders} "||""]}{?\uD83D\uDCC5{stream.age} ?}{?\u2699\uFE0F{stream.indexer}?}\n{?{stream.languageEmojis::join(" / ")}?}', desc: 'Uses the formatting from the Torrentio addon' },
-  torbox: { name: '{addon.name}{stream.library::istrue[" (Your Media) "||""]}{service.cached::istrue[" (Instant "||""]}{service.cached::isfalse[" ("||""]}{service.id::exists["{service.shortName})"||""]}{? ({stream.resolution})?}', description: 'Quality: {stream.quality::exists["{stream.quality}"||"Unknown"]}\nName: {stream.filename::exists["{stream.filename}"||"Unknown"]}\nSize: {stream.size::>0["{stream.size::sbytes} "||""]}{stream.folderSize::>0["/ {stream.folderSize::sbytes} "||""]}', desc: 'Uses the formatting from the TorBox Stremio addon' },
-  custom: { name: '', description: '', desc: 'Define your own formatter' },
-};
-
-let currentFormatter = 'tamtaro';
-let isCustomised = false;
-
-// === Snippets ===
-var snippets = [
-  { label: 'Title', code: '{stream.title}' },
-  { label: 'Resolution', code: '{stream.resolution}' },
-  { label: 'Quality', code: '{stream.quality}' },
-  { label: 'Year', code: '{stream.year}' },
-  { label: 'Size', code: '{stream.size::sbytes}' },
-  { label: 'Encode', code: '{stream.encode}' },
-  { label: 'Audio', code: '{stream.audioTags::join(" \u00b7 ")}' },
-  { label: 'Channels', code: '{stream.audioChannels::join(" \u00b7 ")}' },
-  { label: 'Visual', code: '{stream.visualTags::join(" \u00b7 ")}' },
-  { label: 'Source', code: '{service.shortName}' },
-  { label: 'Release Group', code: '{stream.releaseGroup}' },
-  { label: 'Filename', code: '{stream.filename}' },
-  { label: 'Seeders', code: '{stream.seeders}' },
-  { label: 'Age', code: '{stream.age}' },
-  { label: 'Bitrate', code: '{stream.bitrate::sbitrate}' },
-  { label: 'Duration', code: '{stream.duration::time}' },
-];
-var snRow = document.getElementById('snippets-row');
-snippets.forEach(function(s) {
-  var b = document.createElement('button');
-  b.className = 'px-2 py-1 bg-[#1a1a2a] hover:bg-[#2a2a3a] border border-[#333] text-[10px] font-mono text-gray-300 rounded cursor-pointer';
-  b.textContent = s.label;
-  b.onclick = function() {
-    var ta = document.getElementById('desc-template');
-    var pos = ta.selectionStart || ta.value.length;
-    ta.value = ta.value.substring(0, pos) + s.code + ta.value.substring(pos);
-    ta.focus();
-    onTemplateChange();
-  };
-  snRow.appendChild(b);
-});
-
-function toggleSnippets() { document.getElementById('snippets-panel').classList.toggle('hidden'); }
-
-// === Preset Selector ===
-document.getElementById('preset-select').onchange = function() {
-  var val = this.value;
-  currentFormatter = val;
-  var fmt = BUILTIN_FORMATTERS[val];
-  if (fmt) {
-    document.getElementById('name-template').value = fmt.name || '';
-    document.getElementById('desc-template').value = fmt.description || '';
-    document.getElementById('preset-description').textContent = fmt.desc || '';
-    isCustomised = false;
-    updatePresetStatus();
-    updatePreview();
-  }
-};
-
-function updatePresetStatus() {
-  var s = document.getElementById('preset-status');
-  if (currentFormatter === 'custom') {
-    s.textContent = 'Custom'; s.className = 'text-xs font-medium px-2.5 py-1 rounded-full border bg-indigo-900/40 text-indigo-400 border-indigo-600/30 whitespace-nowrap';
-  } else if (isCustomised) {
-    s.textContent = 'Customised'; s.className = 'text-xs font-medium px-2.5 py-1 rounded-full border bg-yellow-900/40 text-yellow-400 border-yellow-600/30 whitespace-nowrap';
-  } else {
-    s.textContent = 'Using built-in'; s.className = 'text-xs font-medium px-2.5 py-1 rounded-full border bg-green-900/40 text-green-400 border-green-600/30 whitespace-nowrap';
-  }
-}
-
-// === Export/Import ===
-function exportConfig() {
-  var data = { name: document.getElementById('name-template').value, description: document.getElementById('desc-template').value };
-  var blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-  var a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'formatter.json';
-  a.click();
-}
-document.getElementById('file-input').addEventListener('change', function(e) {
-  var file = e.target.files[0]; if (!file) return;
-  var reader = new FileReader();
-  reader.onload = function(ev) {
-    try {
-      var json = JSON.parse(ev.target.result);
-      if (json.name) document.getElementById('name-template').value = json.name;
-      if (json.description) document.getElementById('desc-template').value = json.description;
-      document.getElementById('preset-select').value = 'custom';
-      currentFormatter = 'custom'; isCustomised = true;
-      updatePresetStatus(); updatePreview();
-    } catch(err) { alert('Invalid JSON file.'); }
-  };
-  reader.readAsText(file); e.target.value = '';
-});
-
-// === Sample data (AIOStreams defaults) ===
-const SAMPLE_DATA = {
-  stream: { library: false, resolution: '2160p', quality: 'BluRay', type: 'debrid', nSeScore: 100, seadexBest: false, seadex: false, seeders: 0, audioTags: ['Atmos','TrueHD'], visualTags: ['DV'], filename: 'Oppenheimer.2023.2160p.BluRay.HEVC.DV.TrueHD.Atmos.7.1-group.mkv', folderName: null, encode: 'HEVC', audioChannels: ['7.1'], title: 'Oppenheimer', year: '2023', source: 'universal', seasonEpisode: null, episodes: null, seasons: null, seasonPack: null, duration: 9120, bitrate: 54800000, size: 67108864000, folderSize: 134217728000, message: null, age: '10d', ageHours: 240, releaseGroup: 'group', indexer: null, provider: 'UNIVERSAL', rankedRegexMatched: null, rseMatched: null, regexMatched: null, network: null, editions: null, edition: null, uncensored: null, repack: null, regraded: null, unrated: null, upscaled: null, private: null, freeleech: null, proxied: true, subbed: null, dubbed: null, uLanguages: ['EN'], uSubtitles: null, uSmallLanguageCodes: ['EN'], uSmallSubtitleCodes: null, languages: ['EN'], subtitles: null, languageEmojis: ['\uD83C\uDDEC\uD83C\uDDE7'], subtitleEmojis: null, uLanguageEmojis: ['\uD83C\uDDEC\uD83C\uDDE7'], uSubtitleEmojis: null, languageCodes: ['EN'], uLanguageCodes: ['EN'], subtitleCodes: null, uSubtitleCodes: null, smallLanguageCodes: ['EN'], smallSubtitleCodes: null, wedontknowwhatakilometeris: null, uWedontknowwhatakilometeris: null, regexScore: null, nRegexScore: 100, hasChapters: null, container: null, extension: null, infoHash: null, date: null, folderSeasons: null, formattedFolderSeasons: null, season: null, formattedSeasons: null, episode: null, formattedEpisodes: null, folderEpisodes: null, formattedFolderEpisodes: null, seScore: null, seMatched: null, preloading: null, remastered: null, proper: null },
-  service: { cached: true, shortName: 'Universal', id: 'universal' },
-  metadata: { episodeRuntime: 152, runtime: 152 },
-  addon: { name: 'HerumHai' },
-  config: { addonName: 'HerumHai' },
-};
-
-// === Preview (client-side AIOStreams engine) ===
-let _engine = null;
-let _timer = null;
-
-function loadEngine() {
-  if (_engine) return _engine;
-  // The engine is loaded via <script type="module" src="/formatter-engine.js"> in the <head>
-  // It registers itself on window.__formatterEngine
-  if (typeof window !== 'undefined' && window.__formatterEngine) {
-    _engine = window.__formatterEngine;
-    return _engine;
-  }
-  // Fallback: try dynamic import (for when module script hasn't loaded yet)
-  return null;
-}
-
-function updatePreview() {
-  clearTimeout(_timer);
-  document.getElementById('preview-status').textContent = 'Loading...';
-  _timer = setTimeout(function() {
-    var nt = document.getElementById('name-template').value;
-    var dt = document.getElementById('desc-template').value;
-    if (!nt && !dt) {
-      document.querySelector('.preview-name').textContent = '';
-      document.querySelector('.preview-desc').textContent = '';
-      document.getElementById('preview-status').textContent = '';
-      return;
+        const cacheRes = await fetch('/cache-status');
+        const cacheData = await cacheRes.json();
+        document.getElementById('total-streams').textContent = cacheData.totalStreams || 0;
+      } catch (e) {
+        console.error('Stats error:', e);
+      }
     }
-    var eng = loadEngine();
-    if (!eng) {
-      // Engine not loaded yet — retry in 500ms (module script may still be loading)
-      document.getElementById('preview-status').textContent = 'Loading engine...';
-      _timer = setTimeout(arguments.callee, 500);
-      return;
-    }
-    var name = '', desc = '';
-    try { name = eng.evaluateTemplate(nt, SAMPLE_DATA); } catch(e) { name = 'Error: ' + e.message; }
-    try { desc = eng.evaluateTemplate(dt, SAMPLE_DATA); } catch(e) { desc = 'Error: ' + e.message; }
-    document.querySelector('.preview-name').textContent = name || '';
-    document.querySelector('.preview-desc').textContent = desc || '';
-    document.getElementById('preview-status').textContent = '\u2713 Rendered via AIOStreams engine';
-  }, 300);
-}
+    updateStats();
+    setInterval(updateStats, 5000);
 
-function onTemplateChange() {
-  if (currentFormatter !== 'custom') { isCustomised = true; updatePresetStatus(); }
-  updatePreview();
-}
-document.getElementById('name-template').addEventListener('input', onTemplateChange);
-document.getElementById('desc-template').addEventListener('input', onTemplateChange);
+    async function testStream(forceRefresh = false) {
+      const id = document.getElementById('test-id').value.trim();
+      const type = document.getElementById('test-type').value;
+      if (!id) return;
 
-// === Reset ===
-function resetDefaults() {
-  if (!confirm('Reset to defaults?')) return;
-  RESOLUTIONS.forEach(function(r) { r.selected = true; });
-  document.querySelectorAll('#res-grid button').forEach(function(b, i) {
-    b.className = 'p-2 rounded-lg border text-center text-xs font-bold cursor-pointer transition-all bg-indigo-900/40 border-indigo-600 text-white';
-  });
-  document.getElementById('preset-select').value = 'tamtaro';
-  currentFormatter = 'tamtaro'; isCustomised = false;
-  var fmt = BUILTIN_FORMATTERS.tamtaro;
-  document.getElementById('name-template').value = fmt.name || '';
-  document.getElementById('desc-template').value = fmt.description || '';
-  document.getElementById('preset-description').textContent = fmt.desc || '';
-  updatePresetStatus(); updateResCount(); updatePreview();
-}
+      const result = document.getElementById('test-result');
+      result.style.display = 'block';
+      result.textContent = 'Fetching...';
 
-// === Install/Copy ===
-async function buildUrl() {
-  var params = new URLSearchParams();
-  RESOLUTIONS.forEach(function(r) { params.set(r.key, r.selected ? 'true' : 'false'); });
-  try {
-    var resp = await fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nameTemplate: document.getElementById('name-template').value, descriptionTemplate: document.getElementById('desc-template').value }) });
-    if (resp.ok) { var d = await resp.json(); if (d.id) params.set('config', d.id); }
-  } catch(e) { params.set('nameTemplate', document.getElementById('name-template').value); params.set('descriptionTemplate', document.getElementById('desc-template').value); }
-  return window.location.origin + '/manifest.json?' + params.toString();
-}
-document.getElementById('install-btn').onclick = async function() { var u = await buildUrl(); window.open('stremio://' + u.replace(/^https?:\/\//,''), '_blank'); };
-document.getElementById('copy-btn').onclick = async function() { var u = await buildUrl(); navigator.clipboard.writeText(u); var b = document.getElementById('copy-btn'); var o = b.innerHTML; b.innerHTML = '\u2713 Copied!'; setTimeout(function() { b.innerHTML = o; }, 2000); };
+      try {
+        if (forceRefresh) {
+          result.textContent = 'Force refreshing cache (may take 5-15s)...';
+          await fetch(`/cache-refresh/${type}/${id}`, { method: 'POST' });
+        }
 
-// === INIT ===
-(async function init() {
-  updateResCount();
+        const start = Date.now();
+        const res = await fetch(`/stream/${type}/${id}.json`);
+        const data = await res.json();
+        const elapsed = Date.now() - start;
 
-  // Wait for the engine to load (it registers on window.__formatterEngine)
-  var engineCheckCount = 0;
-  var engineReady = false;
-  var checkEngine = function() {
-    engineCheckCount++;
-    if (window.__formatterEngine) {
-      engineReady = true;
-      // Load ALL presets from the engine's BUILTIN_FORMATTER_DEFINITIONS
-      var builtins = window.__formatterEngine.BUILTIN_FORMATTER_DEFINITIONS;
-      if (builtins) {
-        for (var key in builtins) {
-          if (BUILTIN_FORMATTERS[key]) {
-            BUILTIN_FORMATTERS[key].name = builtins[key].name || '';
-            BUILTIN_FORMATTERS[key].description = builtins[key].description || '';
+        const streams = data.streams || [];
+        result.innerHTML = `<strong>Response: ${streams.length} streams in ${elapsed}ms</strong>\n\n`;
+
+        if (streams.length === 0) {
+          result.innerHTML += '⏳ Cache miss — background scrape triggered.\n   Refresh in 2-3 seconds for streams.';
+          if (!forceRefresh) {
+            setTimeout(() => testStream(), 3000);
+          }
+        } else {
+          streams.slice(0, 15).forEach((s, i) => {
+            result.innerHTML += `${i + 1}. [${s.source || '?'}] ${s.name}\n   ${s.url.slice(0, 100)}\n\n`;
+          });
+          if (streams.length > 15) {
+            result.innerHTML += `... and ${streams.length - 15} more streams\n`;
           }
         }
+      } catch (e) {
+        result.textContent = 'Error: ' + e.message;
       }
-      // Set default to tamtaro (from the EXACT AIOStreams source)
-      var t = BUILTIN_FORMATTERS.tamtaro;
-      document.getElementById('name-template').value = t.name || '';
-      document.getElementById('desc-template').value = t.description || '';
-      document.getElementById('preset-description').textContent = t.desc || '';
-      document.getElementById('preset-select').value = 'tamtaro';
-      updatePresetStatus();
-      _engine = null; // force reload from window
-      updatePreview();
-      return true;
     }
-    if (engineCheckCount > 30) {
-      // Timeout — use fallback /formatter.json
-      return true;
-    }
-    return false;
-  };
-
-  if (!checkEngine()) {
-    var timer = setInterval(function() {
-      if (checkEngine()) clearInterval(timer);
-    }, 200);
-  }
-})();
-</script>
+  </script>
 </body>
 </html>
