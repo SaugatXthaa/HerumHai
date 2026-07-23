@@ -985,8 +985,10 @@ async function scrapeDirectEmbeds(target, title) {
 
 // ===========================================================================
 // Main entry point — runs all scrapers in parallel and merges results
+// baseUrl: the Vercel deployment URL (e.g., https://herum-hai.vercel.app)
+//          used to wrap streams with /api/resolve for Lazy Client Resolver
 // ===========================================================================
-export async function scrapeAllSources(target, title) {
+export async function scrapeAllSources(target, title, baseUrl = '') {
   console.log(`[multisource] starting scrape for ${target.type}/${target.imdbId || target.kitsuId} "${title}"`);
 
   // Run ALL sources in parallel — each has its own timeout
@@ -1058,6 +1060,33 @@ export async function scrapeAllSources(target, title) {
     if (s && s.url && !seen.has(s.url)) {
       seen.add(s.url);
       deduped.push(s);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Lazy Client Resolver (Architecture 1)
+  // ---------------------------------------------------------------------------
+  // Wrap problematic URLs with /api/resolve so Stremio's MPV player fetches
+  // them from the USER'S residential IP (not Vercel's datacenter IP).
+  //
+  // URLs that need wrapping:
+  //   - *.workers.dev → Cloudflare blocks datacenter IPs with 403+HTML
+  //   - hubcloud CDN → same issue
+  //
+  // The /api/resolve endpoint does a 302 redirect, so MPV follows it and
+  // fetches the video directly from the user's IP.
+  // ---------------------------------------------------------------------------
+  if (baseUrl) {
+    for (const s of deduped) {
+      const url = s.url || '';
+      const needsResolve = url.includes('.workers.dev/') ||
+                           url.includes('workers.dev') ||
+                           url.includes('cinecloud.site');
+      if (needsResolve) {
+        const originalUrl = s.url;
+        s.url = `${baseUrl}/api/resolve?url=${encodeURIComponent(originalUrl)}`;
+        console.log(`[resolve] wrapped: ${originalUrl.slice(0, 60)}... → ${s.url.slice(0, 80)}...`);
+      }
     }
   }
 

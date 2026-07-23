@@ -83,6 +83,14 @@
     {
       "source": "/health",
       "destination": "/api/health"
+    },
+    {
+      "source": "/api/resolve",
+      "destination": "/api/resolve"
+    },
+    {
+      "source": "/resolve",
+      "destination": "/api/resolve"
     }
   ],
   "functions": {
@@ -112,6 +120,10 @@
     },
     "api/preview.js": {
       "memory": 512,
+      "maxDuration": 10
+    },
+    "api/resolve.js": {
+      "memory": 128,
       "maxDuration": 10
     }
   },

@@ -1464,7 +1464,9 @@ async function resolveStreams(target, userConfig, baseUrl) {
   // 1d. Multi-source HTTP scraper (PRIMARY — works without backend or puppeteer)
   // Scrapes xpass.top + 4khdhub.one + vidsrc.to using only HTTP (curl).
   // Returns 4-12 working streams per title.
-  const xpassPromise = scrapeAllSources(searchTarget, title).then((streams) => {
+  // baseUrl is passed so workers.dev URLs can be wrapped with /api/resolve
+  // (Lazy Client Resolver — shifts fetch to user's residential IP)
+  const xpassPromise = scrapeAllSources(searchTarget, title, baseUrl).then((streams) => {
     console.log(`[multisource] returned ${streams.length} streams in ${Date.now() - startTime}ms`);
     return streams;
   }).catch((e) => {
