@@ -19,10 +19,16 @@ h1{background:linear-gradient(135deg,#00d4ff,#0066ff);-webkit-background-clip:te
 </head>
 <body><div class="c">
 <h1>HerumHai</h1>
-<p class="s">100+ sources · Direct HTTPS · No debrid · 80MB+ files only</p>
+<p class="s">107+ sources · curl_cffi CF bypass · No debrid · 80MB+ files only</p>
 <div class="card"><h2>📦 Install</h2><p class="i" style="margin-bottom:15px">Click to install in Stremio.</p><a href="#" id="install" class="btn">Install HerumHai</a></div>
 <div class="card"><h2>📊 Status</h2><div id="stats"></div></div>
-<div class="card"><h2>ℹ️ How It Works</h2><p class="i"><b>Primary:</b> HdHub proxy (25+ streams) + 111477 CDN (10-20 direct MKV files)<br><b>Secondary:</b> 100+ web sources with CF bypass (6s+5s wait)<br><b>Filter:</b> 80MB minimum — no ads, trailers, tutorials<br><b>Cache:</b> 6-hour TTL — instant on repeat requests</p></div>
+<div class="card"><h2>ℹ️ How It Works</h2><p class="i">
+<b>Primary:</b> HdHub proxy (25+ streams) + PenguPlay + 111477 CDN (10-27 direct MKV files)<br>
+<b>Secondary:</b> 104+ web sources with <b>curl_cffi</b> (impersonate=chrome) — bypasses Cloudflare TLS fingerprinting without a browser<br>
+<b>Filter:</b> 80MB minimum — no ads, trailers, tutorials<br>
+<b>Cache:</b> 6-hour TTL — instant on repeat requests<br>
+<b>Memory:</b> ~50MB (no browser, pure HTTP)
+</p></div>
 </div>
 <script>
 const h=location.origin;
@@ -32,7 +38,7 @@ document.getElementById('stats').innerHTML=
 `<div class="stat"><b>${d.sources}</b><span>Sources</span></div>
 <div class="stat"><b>${d.cache?.size||0}</b><span>Cached</span></div>
 <div class="stat"><b>${d.memory?.rss||'?'}</b><span>Memory</span></div>
-<div class="stat"><b>${Math.floor(d.uptime/60)}m</b><span>Uptime</span></div>`;
+<div class="stat"><b>${d.cf_bypass||'curl_cffi'}</b><span>CF Bypass</span></div>`;
 }catch(e){}}up();setInterval(up,5000);
 </script>
 </body>
