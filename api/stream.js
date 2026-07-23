@@ -1537,6 +1537,8 @@ async function resolveStreams(target, userConfig, baseUrl) {
     if (s.url.includes('hubcloud.ist/') && !s.url.includes('/drive/')) return false;
     // Filter out Cloudflare R2 URLs that return 403
     if (s.url.includes('.r2.cloudflarestorage.com/')) return false;
+    // Filter out r2.dev URLs (rate-limited, often 403)
+    if (s.url.includes('.r2.dev/')) return false;
     // Filter out donation/promo entries
     const name = (s.name || '').toLowerCase();
     const desc = (s.description || '').toLowerCase();

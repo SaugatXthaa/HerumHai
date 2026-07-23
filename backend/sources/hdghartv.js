@@ -16,7 +16,6 @@
 // ============================================================================
 
 import puppeteer from 'puppeteer';
-import { scrapeUniversalEmbeds } from './universal_embeds.js';
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 const API_BASE = 'https://hdghartv.cc/api';
@@ -111,10 +110,5 @@ export async function scrapeHDGharTV(title, imdbId, type = 'movie', season = nul
     await browser.close().catch(() => {});
   }
 
-  // Fallback: universal embed (xpass.top) if puppeteer/API failed
-  if (imdbId) {
-    console.log(`  [hdghartv] using universal embed fallback`);
-    return scrapeUniversalEmbeds(title, imdbId, type, season, episode);
-  }
   return [];
 }

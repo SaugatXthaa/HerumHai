@@ -32,7 +32,6 @@ import { CF_BLOCKED_SOURCES, closeCFBrowser } from './cf_sources.js';
 import { scrapeAnimeSky, closeBrowser as closeAnimeSkyBrowser } from './animesky.js';
 import { scrapeUniversalEmbeds, scrapeStreameX, closeBrowser as closeUniversalBrowser } from './universal_embeds.js';
 import { scrapeVAPlayer, closeBrowser as closeVAPlayerBrowser } from './vaplayer.js';
-import { scrapeNebula, closeBrowser as closeNebulaBrowser } from './nebula.js';
 import { scrapeMoviesEQ, scrapeCineWave, scrapeTatvaMovies, closeBrowser as closeNewSourcesBrowser } from './new_sources.js';
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
@@ -65,7 +64,7 @@ function createHubCloudSource(slug, name, homepage, searchPath, extraDetailPatte
       console.log(`  [${slug}] → ${searchUrl.slice(0, 100)}`);
 
       // ---------- Phase 1: Fetch search page with axios ----------
-      const searchRes = await fetchHtml(searchUrl, { timeout: 5000 });
+      const searchRes = await fetchHtml(searchUrl, { timeout: 10000 });
       if (searchRes.status !== 200 || !searchRes.body) {
         console.log(`  [${slug}] search returned ${searchRes.status}`);
         return [];  // universal source will handle fallback
@@ -109,7 +108,7 @@ function createHubCloudSource(slug, name, homepage, searchPath, extraDetailPatte
           console.log(`  [${slug}] → detail: ${detailUrl.slice(0, 80)}`);
           const detailRes = await fetchHtml(detailUrl, {
             headers: { Referer: searchUrl },
-            timeout: 5000,
+            timeout: 10000,
           });
           if (detailRes.status === 200 && detailRes.body) {
             const detailIds = extractHubCloudIds(detailRes.body);
@@ -155,30 +154,77 @@ function createHubCloudSource(slug, name, homepage, searchPath, extraDetailPatte
         }
       }
 
-      // ---------- Phase 5: Universal embed fallback ----------
-      // If no HubCloud IDs found via axios, fall back to universal embed
-      // (xpass.top via curl) which is fast (3-5 seconds) and reliable.
-      // This ensures EVERY source returns streams, not just Universal/Streamex.
-      if (streams.length === 0 && (target.imdbId || target.kitsuId)) {
-        console.log(`  [${slug}] no HubCloud streams — using universal embed fallback`);
-        const universalStreams = await scrapeUniversalEmbeds(
-          title, target.imdbId,
-          target.type === 'anime' ? 'series' : target.type,
-          target.season, target.episode, target.kitsuId
-        );
-        // Re-label streams with this source's name and dedupe by URL
-        const existingUrls = new Set(streams.map(s => s.url));
-        for (const s of universalStreams) {
-          if (!existingUrls.has(s.url)) {
-            streams.push({
-              ...s,
-              name: s.name.replace('Universal', name),
-              description: s.description.replace('xpass.top', name),
-              sourceSlug: slug,
-            });
-            existingUrls.add(s.url);
+      // ---------- Phase 5: If axios found 0 HubCloud IDs, try browser (puppeteer) ----------
+      // Many sites are JS-rendered or CF-protected — axios can't get the content.
+      // Puppeteer renders the page (same as PenguPlay) and extracts HubCloud IDs.
+      if (hubcloudIds.length === 0 && streams.length === 0) {
+        console.log(`  [${slug}] axios found 0 IDs — trying browser (puppeteer)`);
+        try {
+          const { hubcloudIds: browserIds, directUrls: browserDirectUrls } = await browserScrapeSource(searchUrl, slug);
+          // Add browser-found IDs
+          for (const id of browserIds) {
+            if (!hubcloudIds.includes(id)) hubcloudIds.push(id);
           }
+          // Resolve browser-found HubCloud IDs
+          for (const id of browserIds.slice(0, 5)) {
+            try {
+              const resolved = await resolveHubCloud(id);
+              if (resolved && resolved.directUrl) {
+                const quality = detectQuality(resolved.filename || resolved.directUrl);
+                const audio = detectAudio(resolved.filename);
+                streams.push({
+                  name: `HerumHai ${quality.rank >= 2160 ? '❄️' : '🎯'} ${quality.label} • ${name}`,
+                  description: `🍿 ${title}\n💾 ${formatFileSize(resolved.fileSize)}\n🎧 Audio: ${audio.join(', ')}`,
+                  url: resolved.directUrl,
+                  behaviorHints: {
+                    notWebReady: true,
+                    filename: resolved.filename || '',
+                    videoSize: resolved.fileSize || 0,
+                    proxyHeaders: {
+                      request: {
+                        'User-Agent': USER_AGENT,
+                        'Referer': resolved.referer || 'https://hubcloud.cx/',
+                      },
+                    },
+                  },
+                  sourceSlug: slug,
+                });
+              }
+            } catch (e) {
+              console.log(`  [${slug}] hubcloud ${id} failed: ${e.message}`);
+            }
+          }
+          // Add direct 111477 URLs from browser
+          for (const url of browserDirectUrls.slice(0, 3)) {
+            if (url.startsWith('https://a.111477.xyz/')) {
+              const bulkUrl = `https://p.111477.xyz/bulk?u=${encodeURIComponent(url)}`;
+              const filename = url.split('/').pop() || '';
+              const quality = detectQuality(filename);
+              streams.push({
+                name: `HerumHai ${quality.rank >= 2160 ? '❄️' : '🎯'} ${quality.label} • ${name} · OD`,
+                description: `🍿 ${title}\n💾 OD Direct\n🎬 ${filename}`,
+                url: bulkUrl,
+                behaviorHints: {
+                  notWebReady: true,
+                  filename,
+                  proxyHeaders: {
+                    request: {
+                      'User-Agent': USER_AGENT,
+                      'Referer': 'https://a.111477.xyz/',
+                    },
+                  },
+                },
+                sourceSlug: slug,
+              });
+            }
+          }
+        } catch (e) {
+          console.log(`  [${slug}] browser scrape failed: ${e.message}`);
         }
+      }
+
+      if (streams.length === 0) {
+        console.log(`  [${slug}] no HubCloud streams found (universal source will handle embed fallback)`);
       }
 
       console.log(`  [${slug}] found ${streams.length} streams`);
@@ -302,23 +348,6 @@ export const ALL_SOURCES = [
     },
   },
 
-  // NebulaStreams — extracts HubCloud IDs from Nebula's pre-scraped database
-  // and resolves them via OUR HubCloud resolver (NOT proxying)
-  {
-    slug: 'nebula',
-    name: 'NebulaStreams',
-    homepage: 'https://nebula.work.gd',
-    searchPath: '/stream/{type}/{imdb}',
-    type: 'embed',
-    async scrape(target, title) {
-      const imdbId = target.imdbId || (target.rawId && target.rawId.startsWith('tt') ? target.rawId : null);
-      if (!imdbId) return [];
-      const type = target.type === 'anime' ? 'series' : target.type;
-      return scrapeNebula(title, imdbId, type, target.season, target.episode);
-    },
-  },
-
-
   // 1. 4KHDHub.store — dedicated scraper (FSL streams via videasy.to player)
   //    Uses JSON.parse hook to capture decrypted HLS stream URLs
   //    VERIFIED: Returns real 4K/1080p/720p/480p HLS streams
@@ -383,7 +412,7 @@ export const ALL_SOURCES = [
       if (!title) return [];
       const searchUrl = `https://aniwaves.ru/search?keyword=${encodeURIComponent(title)}`;
       console.log(`  [aniwaves] → ${searchUrl.slice(0, 80)}`);
-      const searchRes = await fetchHtml(searchUrl, { timeout: 5000 });
+      const searchRes = await fetchHtml(searchUrl, { timeout: 10000 });
       if (searchRes.status !== 200) return [];
 
       // Find anime detail link
@@ -424,7 +453,7 @@ export const ALL_SOURCES = [
       if (!title) return [];
       const searchUrl = `https://animesuge.cz/search?keyword=${encodeURIComponent(title)}`;
       console.log(`  [animesuge] → ${searchUrl.slice(0, 80)}`);
-      const searchRes = await fetchHtml(searchUrl, { timeout: 5000 });
+      const searchRes = await fetchHtml(searchUrl, { timeout: 10000 });
       if (searchRes.status !== 200) return [];
 
       const detailMatch = searchRes.body.match(/href="(\/(?:anime|watch|series)\/[^"]+)"/i);
@@ -545,7 +574,6 @@ export async function scrapeAllSources(target, title, timeoutMs = 25000) {
   await closeUniversalBrowser().catch(() => {});
   await closeVAPlayerBrowser().catch(() => {});
   await closeNewSourcesBrowser().catch(() => {});
-  await closeNebulaBrowser().catch(() => {});
 
   console.log(`[sources] total: ${unique.length} unique streams from ${candidates.length} sources`);
   return unique;
