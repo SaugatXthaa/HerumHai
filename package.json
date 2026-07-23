@@ -1,7 +1,7 @@
 {
-  "name": "herumhai-pengu",
+  "name": "herumhai",
   "version": "9.0.0",
-  "description": "HerumHai — Pure HTTP PenguPlay-style Stremio addon (38+ API sources, no browser)",
+  "description": "HerumHai — Pure HTTP Stremio addon (38+ API sources, no browser)",
   "main": "server.js",
   "type": "module",
   "scripts": {

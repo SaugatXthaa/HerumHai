@@ -2,7 +2,7 @@
 // src/utils/http.js — Pure HTTP Utilities (No Browser)
 // -----------------------------------------------------------------------------
 // All requests use axios + randomized browser headers to mimic organic traffic.
-// No Puppeteer, no FlareSolverr — pure HTTP only (PenguPlay architecture).
+// No Puppeteer, no FlareSolverr — pure HTTP only.
 // =============================================================================
 
 import axios from 'axios';
@@ -38,7 +38,7 @@ export async function fetchHtml(url, { timeout = 8000, referer } = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// Fetch JSON (for API endpoints — the PenguPlay bread and butter)
+// Fetch JSON (for API endpoints)
 // ---------------------------------------------------------------------------
 export async function fetchJson(url, { timeout = 8000, referer, method = 'GET', body } = {}) {
   try {
@@ -74,7 +74,7 @@ export async function fetchJson(url, { timeout = 8000, referer, method = 'GET', 
 
 // ---------------------------------------------------------------------------
 // Validate URL — returns true if URL returns video bytes (not HTML/403/404)
-// Based on PenguPlay's URL validation pattern
+// Based on URL validation pattern
 // ---------------------------------------------------------------------------
 export async function validateUrl(url, { timeout = 5000, referer } = {}) {
   try {

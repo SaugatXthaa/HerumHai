@@ -1,7 +1,7 @@
 // =============================================================================
 // src/sources/embed-apis.js — Pure HTTP Embed API Sources (Batch)
 // -----------------------------------------------------------------------------
-// These are the PenguPlay bread-and-butter sources: pure HTTP API endpoints
+// These are pure HTTP API endpoints: fast, lightweight
 // that return JSON or HTML with embedded stream URLs. No browser needed.
 //
 // Sources (18):

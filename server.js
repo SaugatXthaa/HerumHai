@@ -1,5 +1,5 @@
 // =============================================================================
-// server.js — HerumHai PenguPlay Edition (Pure HTTP, No Browser)
+// server.js — HerumHai Stream Addon (Pure HTTP, No Browser)
 // -----------------------------------------------------------------------------
 // ARCHITECTURE: Asynchronous Background Caching + p-limit(20) concurrency
 //
@@ -23,7 +23,7 @@ import express from 'express';
 import cors from 'cors';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { triggerBackgroundScrape, streamCache, scrapeWithTimeout } from './src/scraper-orchestrator.js';
+import { triggerBackgroundScrape, streamCache, scrapeAllSources } from './src/scraper-orchestrator.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -45,10 +45,10 @@ app.use(express.static(path.join(__dirname, 'public')));
 // ---------------------------------------------------------------------------
 app.get(['/manifest.json', '/manifest'], (req, res) => {
   res.json({
-    id: 'com.herumhai.addon.pengu',
-    version: '9.0.0',
+    id: 'com.herumhai.addon',
+    version: '10.0.0',
     name: 'HerumHai',
-    description: 'PenguPlay-style pure HTTP engine. 38+ API sources aggregated in <2s. Background-cached for instant playback.',
+    description: '38+ source HTTP stream aggregator with background caching. First click scrapes, second click plays.',
     logo: '/logo.png',
     resources: ['stream'],
     types: ['movie', 'series', 'anime'],
@@ -59,18 +59,16 @@ app.get(['/manifest.json', '/manifest'], (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// CRITICAL: Stream endpoint — SYNCHRONOUS scraping with 8s timeout
+// CRITICAL: Stream endpoint — "Double-Click" Method
 // ---------------------------------------------------------------------------
-// Cache HIT  → return streams instantly (<50ms) + trigger background refresh
-// Cache MISS → scrape SYNCHRONOUSLY with 8s hard timeout
-//              - If streams found within 8s → return them immediately
-//              - If timeout hit → return whatever streams were found (even if 0)
-//              - Cache the result for subsequent requests
+// Cache HIT  → return cached streams instantly (<50ms)
+// Cache MISS → trigger background scrape + return a PLACEHOLDER stream card
+//              that tells the user to "Close & Reopen in 10 seconds"
 //
-// This is the CORRECT architecture for Stremio:
-//   - Stremio CAN wait 8-10 seconds (it shows "Fetching..." during this time)
-//   - Stremio does NOT auto-refresh, so returning [] on first request is WRONG
-//   - We MUST return streams on the FIRST request, not []
+// Why this works:
+//   - Stremio does NOT auto-refresh — returning [] makes the addon look broken
+//   - Returning a placeholder card keeps the addon "visible" in Stremio
+//   - User closes & reopens → cache is now populated → real streams appear
 // ---------------------------------------------------------------------------
 app.get(['/stream/:type/:id.json', '/stream/:type/:id'], async (req, res) => {
   const start = Date.now();
@@ -79,35 +77,31 @@ app.get(['/stream/:type/:id.json', '/stream/:type/:id'], async (req, res) => {
 
   console.log(`[/stream] ${type}/${cleanId} — request received`);
 
-  // Check cache first
+  // 1. Check cache — if streams exist, serve them IMMEDIATELY
   const cacheKey = `${type}:${cleanId}`;
   const cached = streamCache[cacheKey];
 
   if (cached && Array.isArray(cached.streams) && cached.streams.length > 0) {
     const elapsed = Date.now() - start;
     console.log(`[/stream] CACHE HIT — ${cached.streams.length} streams in ${elapsed}ms`);
-    // Return cached streams + trigger background refresh (so cache stays fresh)
-    triggerBackgroundScrape(type, cleanId);
     return res.json({ streams: cached.streams });
   }
 
-  // Cache miss — SCRAPE SYNCHRONOUSLY with 8s timeout
-  // Stremio shows "Fetching..." during this time, then displays the streams
-  console.log(`[/stream] CACHE MISS — scraping synchronously (8s timeout)...`);
-  const streams = await scrapeWithTimeout(type, cleanId, 8000);
-  const elapsed = Date.now() - start;
+  // 2. Cache MISS — trigger background scraper (fire-and-forget)
+  console.log(`[/stream] CACHE MISS — triggering background scraper for ${type}/${cleanId}`);
+  triggerBackgroundScrape(type, cleanId);
 
-  console.log(`[/stream] scrape complete — ${streams.length} streams in ${elapsed}ms`);
-
-  // Cache the result
-  streamCache[cacheKey] = {
-    streams,
-    scrapedAt: Date.now(),
-    hits: 0,
-    misses: 0,
-  };
-
-  return res.json({ streams });
+  // 3. Return a PLACEHOLDER stream card (NOT an empty array!)
+  // This keeps the addon visible in Stremio and tells the user what to do.
+  // When the user closes & reopens, the cache will be populated.
+  return res.json({
+    streams: [{
+      name: '⏳ HerumHai',
+      title: '⚙️ Scraping 38+ Sources in background...\n\n👉 CLOSE AND REOPEN THIS MOVIE IN 10 SECONDS!\n\nThe addon is now fetching streams from 38+ sources. Please wait 10 seconds, then close this page and click the movie again. The streams will appear instantly.',
+      externalUrl: 'https://herumhai.app/loading',
+      behaviorHints: { notWebReady: true },
+    }],
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -139,7 +133,7 @@ app.get('/cache-status', (req, res) => {
 app.post('/cache-refresh/:type/:id', async (req, res) => {
   const { type, id } = req.params;
   console.log(`[manual-refresh] ${type}/${id}`);
-  const streams = await scrapeWithTimeout(type, id, 15000);
+  const streams = await scrapeAllSources(type, id);
   const cacheKey = `${type}:${id}`;
   streamCache[cacheKey] = {
     streams,
@@ -157,7 +151,7 @@ app.get('/health', (req, res) => {
   const mem = process.memoryUsage();
   res.json({
     ok: true,
-    version: '9.0.0',
+    version: '10.0.0',
     uptime: process.uptime(),
     memory: {
       rss: Math.round(mem.rss / 1024 / 1024) + 'MB',
@@ -188,7 +182,7 @@ app.get('*', (req, res) => {
 // Start server with long timeouts (for background scrapes)
 // ---------------------------------------------------------------------------
 const server = app.listen(PORT, '0.0.0.0', () => {
-  console.log(`[HerumHai] PenguPlay engine running on http://0.0.0.0:${PORT}`);
+  console.log(`[HerumHai] Stream engine running on http://0.0.0.0:${PORT}`);
   console.log(`[HerumHai] Manifest: http://0.0.0.0:${PORT}/manifest.json`);
   console.log(`[HerumHai] Dashboard: http://0.0.0.0:${PORT}/`);
   console.log(`[HerumHai] Sources: 38 | Concurrency: 20 | Cache TTL: 6h | Memory: ~30MB`);

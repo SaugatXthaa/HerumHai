@@ -1,5 +1,5 @@
 // =============================================================================
-// src/scraper-orchestrator.js — PenguPlay-Style Scraper (Pure HTTP)
+// src/scraper-orchestrator.js — Stream Scraper (Pure HTTP)
 // -----------------------------------------------------------------------------
 // ARCHITECTURE:
 //   - p-limit(20): 20 concurrent HTTP requests (pure HTTP = ~0MB RAM each)
@@ -17,7 +17,7 @@ import { buildStream, extractMetadata } from './utils/stream-builder.js';
 import { getRandomHeaders } from './utils/headers.js';
 
 // CRITICAL: 20 concurrent requests — pure HTTP uses ~0MB per request
-// (PenguPlay uses the same architecture — no browser, pure API calls)
+// (Pure HTTP — no browser, just API calls)
 const limit = pLimit(20);
 
 // Global cache object (as requested)
@@ -211,7 +211,7 @@ export { streamCache as cache };
 //   - Returns streams collected so far (even if not all sources finished)
 //   - Does NOT wait for slow sources — returns partial results
 //
-// This is how PenguPlay works — Stremio shows "Fetching..." for 8 seconds,
+// Stremio shows "Fetching..." for 8 seconds,
 // then displays whatever streams were found.
 // ---------------------------------------------------------------------------
 export async function scrapeWithTimeout(type, id, timeoutMs = 8000) {

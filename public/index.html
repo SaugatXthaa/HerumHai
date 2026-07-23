@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>HerumHai — PenguPlay Engine</title>
+  <title>HerumHai — Stream Addon</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -108,7 +108,7 @@
 <body>
   <div class="container">
     <h1>HerumHai</h1>
-    <p class="subtitle">PenguPlay-style pure HTTP engine · 35 sources · p-limit(20) concurrency · ~30MB RAM</p>
+    <p class="subtitle">Pure HTTP stream engine · 35 sources · p-limit(20) concurrency · ~30MB RAM</p>
 
     <div class="card">
       <h2>📦 Install in Stremio</h2>
@@ -148,10 +148,16 @@
     </div>
 
     <div class="card">
-      <h2>ℹ️ How It Works</h2>
+      <h2>ℹ️ How It Works — "Double-Click" Method</h2>
       <p class="info">
-        <strong>Background Caching:</strong> First request returns <code>{"streams":[]}</code> instantly (&lt;10ms) and triggers
-        a background scrape of all 35 sources with p-limit(20) concurrency. Refresh after 2-3 seconds → streams appear from cache (&lt;50ms).
+        <strong>First Click (Scrape):</strong> When you click a movie for the first time, the addon triggers a
+        background scrape of all 38+ sources. Instead of returning an empty array, it shows a placeholder card:
+        <code>"⚙️ Scraping 38+ Sources... Close & Reopen in 10 Seconds!"</code>
+      </p>
+      <br>
+      <p class="info">
+        <strong>Second Click (Play):</strong> Close the stream view, wait 10 seconds (while the background scraper
+        finishes), then click the movie again. The cache is now populated → all 38+ real streams appear instantly (&lt;50ms).
       </p>
       <br>
       <p class="info">
@@ -166,7 +172,7 @@
       <br>
       <p class="info">
         <strong>Memory Footprint:</strong> ~30MB total (pure HTTP = ~0MB per request). 20 concurrent requests
-        use less memory than a single Puppeteer tab. Perfect for 512MB SnapDeploy free tier.
+        use less memory than a single browser tab. Perfect for 512MB SnapDeploy free tier.
       </p>
     </div>
   </div>
