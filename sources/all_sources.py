@@ -1,179 +1,117 @@
 """
-sources/all_sources.py — All stream sources using curl_cffi for CF bypass.
+sources/all_sources.py — All stream sources (NO HdHub, NO PenguPlay).
 
-Primary sources (always work):
-  1. HdHub proxy (hdhub.thevolecitor.qzz.io) — 25+ direct CDN streams
-  2. PenguPlay (pengu.uk) — 1+ direct stream
-  3. 111477 CDN (a.111477.xyz) — 5-27 direct MKV files from directory listing
-
-Secondary sources (104+ web scrapers using curl_cffi with impersonate="chrome"):
-  - Asian drama, movies, series, anime, hentai, direct download sites
-  - curl_cffi bypasses Cloudflare TLS fingerprinting without a browser
+PRIMARY: 111477 CDN (always works — directory listing)
+SECONDARY: 100+ WordPress sites using curl_cffi + multi-host resolver
+  - HubCloud → sportverse.cc → workers.dev CDN
+  - UnblockedGames → POST → direct video URL
+  - Direct m3u8/mp4/mkv URLs
 """
 
 import re
+import urllib.parse
 from typing import List, Dict, Any
-from utils.http_client import fetch_html, fetch_json_sync, get_ua
+from curl_cffi import requests as cffi
 from sources.cdn111477 import scrape as scrape_cdn111477
+from sources.hubcloud_resolver import resolve_streams_from_html, extract_hubcloud_ids, resolve_hubcloud_streams
+from sources.embed_providers import EMBED_SCRAPERS, scrape_2embed_xpass
+from sources.browser_scraper import browser_scrape_wp_site
 
-CDN_BASE = "https://a.111477.xyz"
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
 
 # =============================================================================
-# PRIMARY SOURCE 1: HdHub proxy (always works, 25+ direct streams)
-# =============================================================================
-def fetch_hdhub_streams(media_type: str, media_id: str) -> List[Dict]:
-    """Fetch streams from HdHub proxy — returns direct CDN URLs."""
-    try:
-        import json
-        from curl_cffi import requests as cffi_requests
-
-        url = f"https://hdhub.thevolecitor.qzz.io/stream/{media_type}/{media_id}.json"
-        response = cffi_requests.get(
-            url,
-            headers={"User-Agent": UA, "Accept": "application/json"},
-            timeout=10,
-            impersonate="chrome",
-            verify=False,
-        )
-
-        if response.status_code != 200:
-            return []
-
-        data = response.json()
-        streams = data.get("streams", [])
-
-        # Filter: only direct HTTPS streams (no torrents, no donation messages)
-        direct = []
-        for s in streams:
-            if not s.get("url") or s.get("infoHash"):
-                continue
-            if not s["url"].startswith("http"):
-                continue
-            if "/login" in s["url"]:
-                continue
-            name = (s.get("name") or "").lower()
-            if "donation" in name or "donate" in name:
-                continue
-            s["source"] = "hdhub"
-            direct.append(s)
-
-        print(f"[hdhub] {len(direct)} streams")
-        return direct
-    except Exception as e:
-        print(f"[hdhub] error: {e}")
-        return []
-
-
-# =============================================================================
-# PRIMARY SOURCE 2: PenguPlay (pengu.uk — returns 1+ direct stream)
-# =============================================================================
-def fetch_pengu_streams(media_type: str, media_id: str) -> List[Dict]:
-    """Fetch streams from PenguPlay."""
-    try:
-        from curl_cffi import requests as cffi_requests
-
-        url = f"https://pengu.uk/stream/{media_type}/{media_id}.json"
-        response = cffi_requests.get(
-            url,
-            headers={"User-Agent": UA, "Accept": "application/json"},
-            timeout=10,
-            impersonate="chrome",
-            verify=False,
-        )
-
-        if response.status_code != 200:
-            return []
-
-        data = response.json()
-        streams = data.get("streams", [])
-
-        direct = []
-        for s in streams:
-            if not s.get("url") or s.get("infoHash"):
-                continue
-            if not s["url"].startswith("http"):
-                continue
-            if "signin" in s["url"]:
-                continue
-            s["source"] = "pengu"
-            direct.append(s)
-
-        print(f"[pengu] {len(direct)} streams")
-        return direct
-    except Exception as e:
-        print(f"[pengu] error: {e}")
-        return []
-
-
-# =============================================================================
-# PRIMARY SOURCE 3: 111477 CDN (5-27 direct MKV files from directory listing)
+# PRIMARY SOURCE: 111477 CDN (5-27 direct MKV files from directory listing)
 # =============================================================================
 def fetch_cdn111477_streams(target: Dict, title: str) -> List[Dict]:
-    """Fetch streams from 111477 CDN directory listing."""
     return scrape_cdn111477(target, title)
 
 
 # =============================================================================
-# SECONDARY SOURCES: 104+ web scrapers using curl_cffi
+# SECONDARY SOURCES: 2-step WordPress scraper with multi-host resolution
 # =============================================================================
-
-def _extract_streams(html: str) -> List[str]:
-    """Extract m3u8/mp4 URLs from HTML."""
-    if not html:
-        return []
-    urls = set()
-    for m in re.finditer(r"(https?://[^\s\"'<>]+\.m3u8[^\s\"'<>]*)", html, re.IGNORECASE):
-        urls.add(m.group(1))
-    for m in re.finditer(r"(https?://[^\s\"'<>]+\.mp4[^\s\"'<>]*)", html, re.IGNORECASE):
-        urls.add(m.group(1))
-    for m in re.finditer(r'"file"\s*:\s*"(https?://[^"]+)"', html, re.IGNORECASE):
-        if ".m3u8" in m.group(1) or ".mp4" in m.group(1):
-            urls.add(m.group(1))
-    return list(urls)
-
-
-def _make_scraper(source_id: str, name: str, base_url: str, search_path: str):
-    """Create a scraper function for a web source."""
+def _make_wp_scraper(source_id: str, name: str, base_url: str, search_path: str):
     def scraper(target: Dict, title: str) -> List[Dict]:
         try:
             clean = re.sub(r"\s+\d{4}$", "", title or "").strip()
             if not clean:
                 return []
+
+            # Step 1: Search
             search_url = f"{base_url}{search_path}{urllib.parse.quote(clean)}"
-            html = fetch_html(search_url, headers={"Referer": base_url})
-            if not html:
+            r = cffi.get(search_url, headers={"User-Agent": UA, "Referer": base_url, "Accept": "text/html"},
+                         timeout=8, impersonate="chrome", verify=False)
+            if r.status_code != 200:
                 return []
-            stream_urls = _extract_streams(html)[:3]
-            return [
-                {
-                    "name": f"HerumHai · {name}",
-                    "title": f"HerumHai · {name}",
-                    "description": f"Source: {name}\nTitle: {title}",
-                    "url": u,
-                    "source": source_id,
-                    "behaviorHints": {
-                        "notWebReady": True,
-                        "proxyHeaders": {"request": {"User-Agent": UA, "Referer": base_url}},
-                    },
-                }
-                for u in stream_urls
-            ]
-        except:
+
+            html = r.text
+            host = urllib.parse.urlparse(base_url).hostname or ""
+            detail_links = set()
+
+            # Pattern 1: Absolute URLs (exclude query params)
+            for m in re.finditer(rf'href="(https?://[^"]*{re.escape(host)}[^"]*)"', html, re.IGNORECASE):
+                link = m.group(1)
+                if "?" in link or link in [base_url, base_url + "/"]:
+                    continue
+                if any(x in link for x in ["/category/", "/tag/", "/page/", "/feed", "/about", "/contact", "/dmca", "/privacy", "/terms", "/wp-", "/author/", "/comment", "/genre/", "/drama-list/"]):
+                    continue
+                slug = link.lower().replace("-", " ").replace("/", " ")
+                title_words = [w for w in clean.lower().split() if len(w) > 2]
+                if any(w in slug for w in title_words):
+                    detail_links.add(link)
+
+            # Pattern 2: Relative URLs (trailing slash optional)
+            for m in re.finditer(r'href="(/[a-z0-9-]+/?)"', html, re.IGNORECASE):
+                link = m.group(1)
+                if link in ["/", "//"] or "?" in link:
+                    continue
+                if any(x in link for x in ["/category/", "/tag/", "/page/", "/feed", "/about", "/contact", "/dmca", "/privacy", "/terms", "/wp-", "/author/", "/comment", "/genre/", "/drama-list/"]):
+                    continue
+                slug = link.lower().replace("-", " ").replace("/", " ")
+                title_words = [w for w in clean.lower().split() if len(w) > 2]
+                if any(w in slug for w in title_words):
+                    detail_links.add(f"{base_url.rstrip('/')}{link}")
+
+            # Pattern 3: movie-card class links
+            for m in re.finditer(r'href="([^"]+)"[^>]*class="[^"]*movie-card[^"]*"', html, re.IGNORECASE):
+                link = m.group(1)
+                if "?" in link:
+                    continue
+                if link.startswith("/"):
+                    link = f"{base_url.rstrip('/')}{link}"
+                if link.startswith("http"):
+                    detail_links.add(link)
+
+            if not detail_links:
+                return []
+
+            # Step 2: Fetch detail pages → extract streams (HubCloud + UnblockedGames + direct)
+            all_streams = []
+            for link in list(detail_links)[:2]:
+                try:
+                    r2 = cffi.get(link, headers={"User-Agent": UA, "Referer": base_url},
+                                  timeout=8, impersonate="chrome", verify=False)
+                    if r2.status_code == 200:
+                        streams = resolve_streams_from_html(r2.text, title, name, source_id)
+                        all_streams.extend(streams)
+                except:
+                    continue
+
+            if all_streams:
+                print(f"[{source_id}] {len(all_streams)} streams")
+            return all_streams
+
+        except Exception as e:
+            print(f"[{source_id}] error: {str(e)[:60]}")
             return []
     return scraper
 
 
-import urllib.parse
-
-# All secondary source configurations
+# All source configurations
 SOURCE_CONFIGS = [
-    # Base64-decoded CDN sources
     ("acermovies", "AcerMovies", "https://acermovies.fun", "/search/"),
     ("scloudx", "SCloudX", "https://scloudx.lol", "/search/"),
     ("dramasuki", "DramaSuki", "https://dramasuki.xyz", "/search/"),
-    # Direct download sites
     ("vegamovies", "VegaMovies", "https://vegamovies.navy", "/?s="),
     ("pahe", "Pahe", "https://pahe.ink", "/?s="),
     ("ddlbase", "DDLBase", "https://ddlbase.com", "/?s="),
@@ -185,7 +123,6 @@ SOURCE_CONFIGS = [
     ("uhdmovies", "UHDMovies", "https://uhdmovies.casa", "/?s="),
     ("4khdhub", "4KHDHub", "https://4khdhub.one", "/?s="),
     ("anime2enjoy", "Anime2Enjoy", "https://www.anime2enjoy.com", "/?s="),
-    ("ondemandchina", "OnDemandChina", "https://www.ondemandchina.com", "/zh-Hans/search?type=video&keyword="),
     ("aether", "Aether", "https://aether.cx", "/?s="),
     ("afterstream", "AfterStream", "https://afterstream.org", "/?s="),
     ("1shows", "1Shows", "https://www.1shows.org", "/?s="),
@@ -199,91 +136,97 @@ SOURCE_CONFIGS = [
     ("jpfilms", "JPFilms", "https://jp-films.com", "/?s="),
     ("animepahe", "AnimePahe", "https://animepahe.pw", "/?s="),
     ("animaxanime", "AnimaxAnime", "https://animaxanime.dpdns.org", "/?s="),
-    # Asian drama
     ("kisskh", "KissKh", "https://kisskh.id", "/api/anime/list?q="),
     ("goplay", "GoPlay", "https://goplay.su", "/search?q="),
-    ("dramacool", "Dramacool", "https://dramacool.com.tr", "/search?query="),
+    ("dramacool", "Dramacool", "https://dramacoolv.buzz", "/?s="),
     ("myasiantv", "MyAsianTV", "https://myasiantv.com.bz", "/search/"),
     ("kissasian", "KissAsian", "https://wwv19.kissasian.com.lv", "/Search?type=Movies&key="),
     ("asianctv", "AsianCTV", "https://asianctv.cc", "/?s="),
     ("asiaflix", "AsiaFlix", "https://asiaflix.net", "/search?q="),
-    # Movies & series
-    ("soap2night", "Soap2Night", "https://soap2night.cc", "/search/"),
-    ("ramoflix", "Ramoflix", "https://ramoflix.net", "/search/"),
+    ("soap2night", "Soap2Night", "https://soap2night.cc", "/?s="),
+    ("ramoflix", "Ramoflix", "https://ramoflix.net", "/?s="),
     ("wmovies", "WMovies", "https://wmovies.org", "/?s="),
-    ("doraby", "Doraby", "https://doraby.com", "/search/"),
-    ("cineby", "Cineby", "https://cineby.sc", "/search/"),
-    ("flickystream", "FlickyStream", "https://flickystream.ru", "/search/"),
-    ("cinema-bz", "Cinema.bz", "https://cinema.bz", "/search/"),
-    ("flixer", "Flixer", "https://flixer.su", "/search/"),
-    ("goojara", "Goojara", "https://goojara.to", "/search/"),
-    ("streamvaults", "StreamVaults", "https://streamvaults.ru", "/search/"),
-    ("67movies", "67Movies", "https://67movies.net", "/search/"),
-    ("shuttletv", "ShuttleTV", "https://shuttletv.su", "/search/"),
-    ("popcornmovies", "PopcornMovies", "https://popcornmovies.org", "/search/"),
-    ("rivestream", "RiveStream", "https://rivestream.app", "/search/"),
-    ("theflixertv", "TheFlixerTV", "https://theflixertv.click", "/search/"),
-    ("onionplay", "OnionPlay", "https://onionplay.io", "/search/"),
-    ("lookmovie2", "LookMovie2", "https://lookmovie2.to", "/search/"),
-    ("pressplayz", "PressPlayz", "https://pressplayz.to", "/search/"),
-    ("nepu", "Nepu", "https://nepu.to", "/search/"),
-    ("fmovies", "FMovies", "https://fmovies.co", "/search/"),
-    ("soap2dayhd", "Soap2DayHD", "https://soap2dayhd.net", "/search/"),
-    ("projectfreetv", "ProjectFreeTV", "https://projectfreetv.sx", "/search/"),
-    ("mappl", "Mappl", "https://mappl.tv", "/search/"),
-    ("streamex", "StreamEx", "https://streamex.sh", "/search/"),
-    ("opstream", "OpStream", "https://opstream.fun", "/search/"),
-    ("movish", "Movish", "https://movish.to", "/search/"),
-    ("themoviebox", "TheMovieBox", "https://themoviebox.org", "/search/"),
-    ("hdtoday", "HDToday", "https://hdtoday.tr", "/search/"),
-    ("cinebytv", "CinebyTV", "https://cinebytv.com", "/search/"),
-    ("ridomovies", "RidoMovies", "https://ridomovies.su", "/search/"),
-    ("123moviesfree", "123MoviesFree", "https://123moviesfree.net", "/search/"),
-    ("vidplay", "VidPlay", "https://vidplay.top", "/search/"),
-    ("cinemaos", "CinemaOS", "https://cinemaos.live", "/search/"),
-    ("yesmovies", "YesMovies", "https://yesmovies.ag", "/search/"),
-    ("primewire", "PrimeWire", "https://primewire.mov", "/search/"),
-    ("m4uhd", "M4UHD", "https://m4uhd.page", "/search/"),
-    # New sources
-    ("net77", "Net77", "https://net77.cc", "/search/"),
-    ("fluxtv", "FluxTV", "https://fluxtv.cc", "/search/"),
-    ("ernax", "Ernax", "https://ernax.pro", "/search/"),
-    ("boredflix", "Boredflix", "https://boredflix.tv", "/search/"),
-    ("hdmovix", "HDMovix", "https://hdmovix.cc", "/search/"),
-    ("streamiw", "Streamiw", "https://streamiw.xyz", "/search/"),
-    ("fmoviesgd", "FMovies.gd", "https://fmovies.gd", "/search/"),
-    ("flixstream", "FlixStream", "https://flixstream.ca", "/search/"),
-    ("dulo", "Dulo", "https://dulo.tv", "/search/"),
-    ("sflix", "SFlix", "https://sflix.ws", "/search/"),
-    ("broodingmovies", "BroodingMovies", "https://broodingmovies.com", "/search/"),
-    ("streamduck", "StreamDuck", "https://streamduck.site", "/search/"),
-    ("hydraflix", "HydraFlix", "https://www.hydraflix.cc", "/search/"),
-    ("cinebygd", "Cineby.gd", "https://cineby.gd", "/search/"),
-    ("cinestreamsite", "CineStream.site", "https://cine-stream.site", "/search/"),
-    # Anime
-    ("anime-nexus", "AnimeNexus", "https://anime.nexus", "/search/"),
-    ("anisuge", "Anisuge", "https://anisuge.tv", "/search/"),
-    ("anizone", "AniZone", "https://anizone.to", "/search/"),
-    ("miruro", "Miruro", "https://miruro.to", "/search/"),
-    ("anitaku-io", "AniTaku", "https://anitaku.io", "/search/"),
-    ("anify", "Anify", "https://anify.to", "/search/"),
-    ("animetsu", "Animetsu", "https://animetsu.bz", "/search/"),
-    ("kickass-anime", "KickassAnime", "https://kickass-anime.ro", "/search/"),
-    ("animex", "AnimeX", "https://animex.one", "/search/"),
-    ("animegg", "AnimeGG", "https://animegg.org", "/search/"),
-    ("animestream", "AnimeStream", "https://animestream.net", "/search/"),
-    ("allmanga", "AllManga", "https://allmanga.to", "/search/"),
-    ("aniworld", "AniWorld", "https://aniworld.to", "/search/"),
-    ("wcostream", "WCOStream", "https://wcostream.tv", "/search/"),
-    ("9anime", "9Anime", "https://9anime.cl", "/search/"),
-    # Hentai
-    ("hanime", "Hanime", "https://hanime.tv", "/search/"),
-    ("hentaihaven", "HentaiHaven", "https://hentaihaven.xxx", "/search/"),
+    ("doraby", "Doraby", "https://doraby.com", "/?s="),
+    ("cineby", "Cineby", "https://cineby.sc", "/?s="),
+    ("flickystream", "FlickyStream", "https://flickystream.ru", "/?s="),
+    ("cinema-bz", "Cinema.bz", "https://cinema.bz", "/?s="),
+    ("flixer", "Flixer", "https://flixer.su", "/?s="),
+    ("goojara", "Goojara", "https://goojara.to", "/?s="),
+    ("streamvaults", "StreamVaults", "https://streamvaults.ru", "/?s="),
+    ("67movies", "67Movies", "https://67movies.net", "/?s="),
+    ("shuttletv", "ShuttleTV", "https://shuttletv.su", "/?s="),
+    ("popcornmovies", "PopcornMovies", "https://popcornmovies.org", "/?s="),
+    ("rivestream", "RiveStream", "https://rivestream.app", "/?s="),
+    ("theflixertv", "TheFlixerTV", "https://theflixertv.click", "/?s="),
+    ("onionplay", "OnionPlay", "https://onionplay.io", "/?s="),
+    ("lookmovie2", "LookMovie2", "https://lookmovie2.to", "/?s="),
+    ("pressplayz", "PressPlayz", "https://pressplayz.to", "/?s="),
+    ("nepu", "Nepu", "https://nepu.to", "/?s="),
+    ("fmovies", "FMovies", "https://fmovies.co", "/?s="),
+    ("soap2dayhd", "Soap2DayHD", "https://soap2dayhd.net", "/?s="),
+    ("projectfreetv", "ProjectFreeTV", "https://projectfreetv.sx", "/?s="),
+    ("mappl", "Mappl", "https://mappl.tv", "/?s="),
+    ("streamex", "StreamEx", "https://streamex.sh", "/?s="),
+    ("opstream", "OpStream", "https://opstream.fun", "/?s="),
+    ("movish", "Movish", "https://movish.to", "/?s="),
+    ("themoviebox", "TheMovieBox", "https://themoviebox.org", "/?s="),
+    ("hdtoday", "HDToday", "https://hdtoday.tr", "/?s="),
+    ("cinebytv", "CinebyTV", "https://cinebytv.com", "/?s="),
+    ("ridomovies", "RidoMovies", "https://ridomovies.su", "/?s="),
+    ("123moviesfree", "123MoviesFree", "https://123moviesfree.net", "/?s="),
+    ("vidplay", "VidPlay", "https://vidplay.top", "/?s="),
+    ("cinemaos", "CinemaOS", "https://cinemaos.live", "/?s="),
+    ("yesmovies", "YesMovies", "https://yesmovies.ag", "/?s="),
+    ("primewire", "PrimeWire", "https://primewire.mov", "/?s="),
+    ("m4uhd", "M4UHD", "https://m4uhd.page", "/?s="),
+    ("net77", "Net77", "https://net77.cc", "/?s="),
+    ("fluxtv", "FluxTV", "https://fluxtv.cc", "/?s="),
+    ("ernax", "Ernax", "https://ernax.pro", "/?s="),
+    ("boredflix", "Boredflix", "https://boredflix.tv", "/?s="),
+    ("hdmovix", "HDMovix", "https://hdmovix.cc", "/?s="),
+    ("streamiw", "Streamiw", "https://streamiw.xyz", "/?s="),
+    ("fmoviesgd", "FMovies.gd", "https://fmovies.gd", "/?s="),
+    ("flixstream", "FlixStream", "https://flixstream.ca", "/?s="),
+    ("dulo", "Dulo", "https://dulo.tv", "/?s="),
+    ("sflix", "SFlix", "https://sflix.ws", "/?s="),
+    ("broodingmovies", "BroodingMovies", "https://broodingmovies.com", "/?s="),
+    ("streamduck", "StreamDuck", "https://streamduck.site", "/?s="),
+    ("hydraflix", "HydraFlix", "https://www.hydraflix.cc", "/?s="),
+    ("cinebygd", "Cineby.gd", "https://cineby.gd", "/?s="),
+    ("cinestreamsite", "CineStream.site", "https://cine-stream.site", "/?s="),
+    ("anime-nexus", "AnimeNexus", "https://anime.nexus", "/?s="),
+    ("anisuge", "Anisuge", "https://anisuge.tv", "/?s="),
+    ("anizone", "AniZone", "https://anizone.to", "/?s="),
+    ("miruro", "Miruro", "https://miruro.to", "/?s="),
+    ("anitaku-io", "AniTaku", "https://anitaku.io", "/?s="),
+    ("anify", "Anify", "https://anify.to", "/?s="),
+    ("animetsu", "Animetsu", "https://animetsu.bz", "/?s="),
+    ("kickass-anime", "KickassAnime", "https://kickass-anime.ro", "/?s="),
+    ("animex", "AnimeX", "https://animex.one", "/?s="),
+    ("animegg", "AnimeGG", "https://animegg.org", "/?s="),
+    ("animestream", "AnimeStream", "https://animestream.net", "/?s="),
+    ("allmanga", "AllManga", "https://allmanga.to", "/?s="),
+    ("aniworld", "AniWorld", "https://aniworld.to", "/?s="),
+    ("wcostream", "WCOStream", "https://wcostream.tv", "/?s="),
+    ("9anime", "9Anime", "https://9anime.cl", "/?s="),
+    ("hanime", "Hanime", "https://hanime.tv", "/?s="),
+    ("hentaihaven", "HentaiHaven", "https://hentaihaven.xxx", "/?s="),
     ("nhentai", "Nhentai", "https://nhentai.net", "/search/?q="),
 ]
 
-# Build all secondary scrapers
 ALL_SECONDARY_SOURCES = [
-    {"id": sid, "name": sname, "scrape": _make_scraper(sid, sname, burl, spath)}
+    {"id": sid, "name": sname, "scrape": _make_wp_scraper(sid, sname, burl, spath)}
     for sid, sname, burl, spath in SOURCE_CONFIGS
+]
+
+# Browser-based scrapers for sites that need JavaScript rendering
+# These use Playwright (ultra-lean: images blocked, single-process) to render
+# JS-loaded content that curl_cffi can't see
+BROWSER_SOURCES = [
+    {"id": "vegamovies", "name": "VegaMovies", "base_url": "https://vegamovies.navy", "search_path": "/?s="},
+    {"id": "uhdmovies", "name": "UHDMovies", "base_url": "https://uhdmovies.casa", "search_path": "/?s="},
+    {"id": "rarefilmm", "name": "RareFilmm", "base_url": "https://rarefilmm.com", "search_path": "/?s="},
+    {"id": "pahe", "name": "Pahe", "base_url": "https://pahe.ink", "search_path": "/?s="},
+    {"id": "showbox", "name": "ShowBox", "base_url": "https://www.showbox.media", "search_path": "/?s="},
+    {"id": "xdmovies", "name": "XDMovies", "base_url": "https://top.xdmovies.wtf", "search_path": "/?s="},
 ]
