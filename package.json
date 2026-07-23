@@ -1,7 +1,7 @@
 {
   "name": "herumhai",
-  "version": "11.0.0",
-  "description": "HerumHai — Direct stream aggregator using proven working APIs",
+  "version": "14.0.0",
+  "description": "HerumHai — 100+ source direct HTTPS stream aggregator",
   "main": "server.js",
   "type": "module",
   "scripts": {
@@ -10,7 +10,8 @@
   "dependencies": {
     "axios": "^1.7.9",
     "cors": "^2.8.5",
-    "express": "^4.21.2"
+    "express": "^4.21.2",
+    "p-limit": "^6.1.0"
   },
   "engines": {
     "node": ">=20.0.0"

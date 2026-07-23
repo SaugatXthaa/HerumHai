@@ -1,83 +1,39 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>HerumHai</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: -apple-system, sans-serif; background: #0a0e1a; color: #e0e0e0; padding: 20px; }
-    .container { max-width: 700px; margin: 0 auto; }
-    h1 { background: linear-gradient(135deg, #00d4ff, #0066ff); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 2.5em; margin-bottom: 10px; }
-    .subtitle { color: #888; margin-bottom: 30px; }
-    .card { background: #131826; border: 1px solid #1e2538; border-radius: 12px; padding: 24px; margin-bottom: 20px; }
-    .card h2 { color: #00d4ff; margin-bottom: 16px; }
-    .btn { display: inline-block; background: linear-gradient(135deg, #00d4ff, #0066ff); color: #0a0e1a; padding: 14px 32px; border-radius: 8px; text-decoration: none; font-weight: bold; font-size: 1.1em; }
-    .info { color: #888; line-height: 1.6; }
-    .info strong { color: #00d4ff; }
-    .stat { display: inline-block; background: #0a0e1a; padding: 12px 20px; border-radius: 8px; margin: 5px; }
-    .stat-value { font-size: 1.8em; font-weight: bold; color: #00d4ff; }
-    .stat-label { color: #888; font-size: 0.85em; }
-  </style>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HerumHai</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:system-ui,sans-serif;background:#0a0e1a;color:#e0e0e0;padding:20px}
+.c{max-width:700px;margin:0 auto}
+h1{background:linear-gradient(135deg,#00d4ff,#0066ff);-webkit-background-clip:text;-webkit-text-fill-color:transparent;font-size:2.5em;margin-bottom:10px}
+.s{color:#888;margin-bottom:30px}
+.card{background:#131826;border:1px solid #1e2538;border-radius:12px;padding:24px;margin-bottom:20px}
+.card h2{color:#00d4ff;margin-bottom:16px}
+.btn{display:inline-block;background:linear-gradient(135deg,#00d4ff,#0066ff);color:#0a0e1a;padding:14px 32px;border-radius:8px;text-decoration:none;font-weight:bold;font-size:1.1em}
+.i{color:#888;line-height:1.6}.i b{color:#00d4ff}
+.stat{display:inline-block;background:#0a0e1a;padding:12px 20px;border-radius:8px;margin:5px}
+.stat b{font-size:1.8em;color:#00d4ff;display:block}.stat span{color:#888;font-size:.85em}
+</style>
 </head>
-<body>
-  <div class="container">
-    <h1>HerumHai</h1>
-    <p class="subtitle">Direct stream aggregator · HdHub CDN + Torrentio · 20+ streams per title</p>
-
-    <div class="card">
-      <h2>📦 Install in Stremio</h2>
-      <p class="info" style="margin-bottom:15px;">Click to install. Supports movies, series, and anime.</p>
-      <a href="#" id="install-link" class="btn">Install HerumHai</a>
-    </div>
-
-    <div class="card">
-      <h2>📊 Status</h2>
-      <div id="stats">
-        <div class="stat"><div class="stat-value" id="cache-size">—</div><div class="stat-label">Cached Titles</div></div>
-        <div class="stat"><div class="stat-value" id="total-streams">—</div><div class="stat-label">Total Streams</div></div>
-        <div class="stat"><div class="stat-value" id="mem">—</div><div class="stat-label">Memory</div></div>
-        <div class="stat"><div class="stat-value" id="uptime">—</div><div class="stat-label">Uptime</div></div>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>📋 Sources</h2>
-      <p class="info">
-        <strong>1. HdHub Proxy</strong> — 21-65 direct CDN streams per title<br>
-        Sources: workers.dev, pixeldrain.dev, fsl-buckets, googleusercontent<br><br>
-        <strong>2. Torrentio</strong> — 56+ torrent streams (P2P / debrid)
-      </p>
-    </div>
-
-    <div class="card">
-      <h2>ℹ️ How It Works</h2>
-      <p class="info">
-        <strong>First request:</strong> Fetches streams from HdHub proxy + Torrentio in parallel (3-5 seconds).
-        Stremio shows "Fetching..." during this time, then displays all streams.<br><br>
-        <strong>Subsequent requests:</strong> Returns cached streams instantly (&lt;50ms).<br><br>
-        <strong>Cache TTL:</strong> 6 hours — streams stay cached and refresh automatically.
-      </p>
-    </div>
-  </div>
-
-  <script>
-    const host = window.location.origin;
-    document.getElementById('install-link').href = `stremio://${host.replace('https://','').replace('http://','')}/manifest.json`;
-
-    async function updateStats() {
-      try {
-        const res = await fetch('/health');
-        const d = await res.json();
-        document.getElementById('cache-size').textContent = d.cache?.size || 0;
-        document.getElementById('total-streams').textContent = d.cache?.totalStreams || 0;
-        document.getElementById('mem').textContent = d.memory?.rss || '—';
-        const m = Math.floor(d.uptime / 60);
-        document.getElementById('uptime').textContent = m < 60 ? m + 'm' : Math.floor(m/60) + 'h';
-      } catch (e) {}
-    }
-    updateStats();
-    setInterval(updateStats, 5000);
-  </script>
+<body><div class="c">
+<h1>HerumHai</h1>
+<p class="s">100+ sources · Direct HTTPS · No debrid · 80MB+ files only</p>
+<div class="card"><h2>📦 Install</h2><p class="i" style="margin-bottom:15px">Click to install in Stremio.</p><a href="#" id="install" class="btn">Install HerumHai</a></div>
+<div class="card"><h2>📊 Status</h2><div id="stats"></div></div>
+<div class="card"><h2>ℹ️ How It Works</h2><p class="i"><b>Primary:</b> HdHub proxy (25+ streams) + 111477 CDN (10-20 direct MKV files)<br><b>Secondary:</b> 100+ web sources with CF bypass (6s+5s wait)<br><b>Filter:</b> 80MB minimum — no ads, trailers, tutorials<br><b>Cache:</b> 6-hour TTL — instant on repeat requests</p></div>
+</div>
+<script>
+const h=location.origin;
+document.getElementById('install').href=`stremio://${h.replace('https://','').replace('http://','')}/manifest.json`;
+async function up(){try{const r=await fetch('/health');const d=await r.json();
+document.getElementById('stats').innerHTML=
+`<div class="stat"><b>${d.sources}</b><span>Sources</span></div>
+<div class="stat"><b>${d.cache?.size||0}</b><span>Cached</span></div>
+<div class="stat"><b>${d.memory?.rss||'?'}</b><span>Memory</span></div>
+<div class="stat"><b>${Math.floor(d.uptime/60)}m</b><span>Uptime</span></div>`;
+}catch(e){}}up();setInterval(up,5000);
+</script>
 </body>
 </html>
