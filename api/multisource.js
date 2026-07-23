@@ -240,8 +240,10 @@ function extractMetadata(text) {
 
 // ---------------------------------------------------------------------------
 // Build stream object with proper metadata
+// Includes `source` field so the formatter can show real source name
+// (e.g., "4KHDHub" instead of default "HerumHai")
 // ---------------------------------------------------------------------------
-function buildStream({ name, description, url, filename, sizeBytes, referer, ua = MOBILE_UA, bingeGroup }) {
+function buildStream({ name, description, url, filename, sizeBytes, referer, ua = MOBILE_UA, bingeGroup, source }) {
   const behaviorHints = {
     notWebReady: true,
     proxyHeaders: {
@@ -255,7 +257,12 @@ function buildStream({ name, description, url, filename, sizeBytes, referer, ua 
   if (sizeBytes) behaviorHints.videoSize = sizeBytes;
   if (bingeGroup) behaviorHints.bingeGroup = bingeGroup;
 
-  return { name, description, url, behaviorHints };
+  // The `source` field is read by stream.js's extractStreamData() to set
+  // service.shortName in the formatter. This makes the stream name display
+  // the actual source (e.g., "[4KHDHub] HerumHai") instead of "[HerumHai] HerumHai".
+  const stream = { name, description, url, behaviorHints };
+  if (source) stream.source = source;
+  return stream;
 }
 
 // ===========================================================================
@@ -403,6 +410,7 @@ async function scrapeXpass(target, title) {
       referer: 'https://play.xpass.top/',
       ua: MOBILE_UA,
       bingeGroup: `herumhai-xpass-${src.id || src.label}`,
+      source: 'xpass',
     }));
   }
   return streams;
@@ -584,6 +592,7 @@ async function scrape4khdhubOne(target, title, domain = 'one') {
           referer: 'https://hubcloud.cx/',
           ua: DESKTOP_UA,
           bingeGroup: `herumhai-4khdhub-${hcId}`,
+          source: '4khdhub',
         });
       } catch (e) {
         console.log(`[4khdhub.${domain}] #${idx + 1} ${hcId}: error — ${e.message}`);
@@ -686,6 +695,7 @@ async function scrapeCinefreakNet(target, title) {
       referer: 'https://cinefreak.net/',
       ua: DESKTOP_UA,
       bingeGroup: `herumhai-cinefreak-${idx}`,
+      source: 'cinefreak',
     }));
   }
 
@@ -851,6 +861,7 @@ async function scrapeRlsbbCc(target, title) {
       referer: 'https://rlsbb.cc/',
       ua: DESKTOP_UA,
       bingeGroup: `herumhai-rlsbb-${idx}`,
+      source: 'rlsbb',
     }));
   }
 
@@ -906,6 +917,7 @@ async function scrapeVidSrcTo(target, title) {
         referer: innerUrl,
         ua: DESKTOP_UA,
         bingeGroup: `herumhai-vidsrc-${Date.now().toString(36)}`,
+        source: 'vidsrc',
       }));
     }
   }
@@ -947,6 +959,14 @@ async function scrapeDirectEmbeds(target, title) {
   const streams = [];
   for (const p of testResults.filter((t) => t.working)) {
     console.log(`[embeds] ${p.name}: HTTP ${p.code} — adding as embed`);
+    // Map provider name to source slug (for formatter display)
+    const sourceMap = {
+      'VidLink': 'vidlink',
+      'VidFast': 'vidfast',
+      '2Embed': '2embed',
+      'VidSrc': 'vidsrc',
+      'EmbedSu': 'embedsu',
+    };
     streams.push(buildStream({
       name: `HerumHai · ${p.name}`,
       description: `Source: ${p.name} (embed player)\nTitle: ${title || ''}`,
@@ -955,6 +975,7 @@ async function scrapeDirectEmbeds(target, title) {
       referer: 'https://www.2embed.cc/',
       ua: DESKTOP_UA,
       bingeGroup: `herumhai-embed-${p.name.toLowerCase()}`,
+      source: sourceMap[p.name] || 'embed',
     }));
   }
 

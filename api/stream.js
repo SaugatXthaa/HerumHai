@@ -1529,6 +1529,9 @@ async function resolveStreams(target, userConfig, baseUrl) {
         s.url.includes('flocw.com') || s.url.includes('klcxm.com') ||
         s.url.includes('hvncw.com') || s.url.includes('wnowe.com') ||
         s.url.includes('hvncw.com')) return false;
+    // Filter out bzzhr.co — returns Cloudflare challenge HTML (not video),
+    // causes "MPV unrecognized file format" errors in Stremio
+    if (s.url.includes('bzzhr.co')) return false;
     // Filter out HubCloud CDN URLs that return HTML/400 (not video)
     if (s.url.includes('pixel.hubcloud.cx/?id=') || s.url.includes('gpdl.hubcloud.cx/?id=') ||
         s.url.includes('gpdl2.hubcloud.cx/?id=')) return false;
@@ -2184,6 +2187,13 @@ function extractStreamData(s, title, addonName) {
     'moviescounter': 'MoviesCounter',
     'vidsrc': 'VidSrc',
     '2embed': '2Embed',
+    // NEW: sources added by multisource.js
+    'xpass': 'xpass',
+    'rlsbb': 'RlsBB',
+    'vidlink': 'VidLink',
+    'vidfast': 'VidFast',
+    'embedsu': 'EmbedSu',
+    'embed': 'Embed',
   };
   const serviceShortName = shortNameMap[sourceSlug] || sourceSlug;
   // Service is "cached" if it's a debrid/cached source
