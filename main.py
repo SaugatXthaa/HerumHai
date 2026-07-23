@@ -83,10 +83,16 @@ async def get_streams(media_type: str, media_id: str):
         try:
             all_futures = embed_futures + secondary_futures
             all_results = await asyncio.wait_for(
-                asyncio.gather(*all_futures, return_exceptions=True), timeout=20.0
+                asyncio.gather(*all_futures, return_exceptions=True), timeout=15.0
             )
         except asyncio.TimeoutError:
-            all_results = [f.result() for f in all_futures if f.done()]
+            all_results = []
+            for f in all_futures:
+                try:
+                    if f.done():
+                        all_results.append(f.result())
+                except:
+                    pass
 
         all_streams = list(cdn111)
 
@@ -99,7 +105,7 @@ async def get_streams(media_type: str, media_id: str):
             ]
             browser_results = await asyncio.wait_for(
                 run_browser_scrapers(target, title, browser_sources),
-                timeout=20.0
+                timeout=35.0
             )
             all_streams.extend(browser_results)
         except Exception as e:

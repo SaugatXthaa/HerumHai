@@ -13,7 +13,7 @@ Providers:
 import re
 import json
 from typing import List, Dict
-from curl_cffi import requests as cffi
+from utils.http_client import fetch_html, fetch_json, fetch_stealthy_html, fetch_stealthy_json
 
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 TMDB_KEY = "f894b4342dfe25ee2ca3ee30b552e16f"
@@ -23,10 +23,8 @@ def _resolve_tmdb_id(imdb_id: str, media_type: str) -> str:
     """Resolve IMDB ID to TMDB ID."""
     try:
         kind = "movie" if media_type == "movie" else "tv"
-        r = cffi.get(f"https://api.themoviedb.org/3/find/{imdb_id}?api_key={TMDB_KEY}&external_source=imdb_id",
-                     headers={"User-Agent": UA}, timeout=5, impersonate="chrome", verify=False)
-        if r.status_code == 200:
-            data = r.json()
+        data = fetch_json(f"https://api.themoviedb.org/3/find/{imdb_id}?api_key={TMDB_KEY}&external_source=imdb_id", timeout=5)
+        if data:
             arr = data.get(f"{kind}_results", [])
             if arr and arr[0].get("id"):
                 return str(arr[0]["id"])
@@ -62,18 +60,17 @@ def scrape_2embed_xpass(target: Dict, title: str) -> List[Dict]:
                 return []
             embed_url = f"https://play.xpass.top/e/tv/{tmdb_id}/{season or 1}/{episode or 1}"
 
-        r = cffi.get(embed_url, headers={"User-Agent": UA, "Referer": "https://www.2embed.cc/"},
-                     timeout=10, impersonate="chrome", verify=False)
-        if r.status_code != 200:
+        html = fetch_stealthy_html(embed_url, timeout=20)
+        if not html:
             return []
 
         # Check if xpass found the title
-        if '"playlist":"/vxr/tv/0/' in r.text or '"playlist":"/vrk/tv/0/' in r.text:
+        if '"playlist":"/vxr/tv/0/' in html or '"playlist":"/vrk/tv/0/' in html:
             return []
 
         # Extract playlist URLs
         playlist_paths = set()
-        for m in re.finditer(r'"url":"([^"]*playlist\.json)"', r.text):
+        for m in re.finditer(r'"url":"([^"]*playlist\.json)"', html):
             if "/video/error" not in m.group(1):
                 playlist_paths.add(m.group(1))
 
@@ -82,14 +79,10 @@ def scrape_2embed_xpass(target: Dict, title: str) -> List[Dict]:
 
         # Fetch playlists
         streams = []
-        for path in list(playlist_paths)[:8]:
+        for path in list(playlist_paths)[:2]:
             url = path if path.startswith("http") else f"https://play.xpass.top{path}"
             try:
-                r2 = cffi.get(url, headers={"User-Agent": UA, "Referer": embed_url},
-                              timeout=5, impersonate="chrome", verify=False)
-                if r2.status_code != 200:
-                    continue
-                data = r2.json()
+                data = fetch_stealthy_json(url, timeout=8)
                 if not data or not data.get("playlist") or not data["playlist"][0].get("sources"):
                     continue
                 for src in data["playlist"][0]["sources"]:
@@ -184,7 +177,7 @@ def _autoembed_url(t): return f"https://autoembed.cc/embed/movie/{t['imdb_id']}"
 
 # All embed scrapers
 EMBED_SCRAPERS = [
-    {"id": "2embed-xpass", "name": "2Embed", "scrape": scrape_2embed_xpass},
+    # xpass/2embed is handled by browser_scraper.py via StealthyFetcher (CF Turnstile bypass)
     {"id": "vidlink", "name": "VidLink", "scrape": make_embed_scraper("vidlink", "VidLink", _vidlink_url)},
     {"id": "vidfast", "name": "VidFast", "scrape": make_embed_scraper("vidfast", "VidFast", _vidfast_url)},
     {"id": "vidsrcwin", "name": "VidSrc.win", "scrape": make_embed_scraper("vidsrcwin", "VidSrc.win", _vidsrcwin_url)},

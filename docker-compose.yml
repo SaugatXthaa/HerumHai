@@ -1,0 +1,26 @@
+version: "3.8"
+services:
+  herumhai:
+    build: .
+    ports:
+      - "7000:7000"
+    environment:
+      - PORT=7000
+      - TRAWL_URL=http://trawl:8191
+    depends_on:
+      - trawl
+    restart: unless-stopped
+    mem_limit: 350m
+
+  # TRAWL — free FlareSolverr replacement (github.com/germondai/trawl)
+  # Uses advanced browser engine that spoofs canvas properties
+  # Bypasses CF Turnstile without heavy resource usage
+  trawl:
+    image: ghcr.io/germondai/trawl:latest
+    ports:
+      - "8191:8191"
+    environment:
+      - LOG_LEVEL=info
+      - TZ=UTC
+    restart: unless-stopped
+    mem_limit: 200m

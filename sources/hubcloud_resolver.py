@@ -8,7 +8,7 @@ UnblockedGames chain: cloud.unblockedgames.world/?sid=BASE64 → POST → CDN UR
 import re
 import base64
 from typing import List, Dict, Optional
-from curl_cffi import requests as cffi
+from utils.http_client import fetch_html
 
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 HUBCLOUD_DOMAINS = ["hubcloud.cx", "hubcloud.ist", "hubcloud.club", "hubcloud.fans"]
@@ -56,9 +56,9 @@ def resolve_hubcloud_id(hc_id: str) -> Optional[Dict]:
     for domain in HUBCLOUD_DOMAINS:
         try:
             url = f"https://{domain}/drive/{hc_id}"
-            r = cffi.get(url, headers={"User-Agent": UA}, timeout=6, impersonate="chrome", verify=False)
-            if r.status_code == 200:
-                m = re.search(r"var url = '([^']+)'", r.text)
+            html = fetch_html(url)
+            if html:
+                m = re.search(r"var url = '([^']+)'", html)
                 if m:
                     sportverse_url = m.group(1)
                     break
@@ -69,14 +69,14 @@ def resolve_hubcloud_id(hc_id: str) -> Optional[Dict]:
         return None
 
     try:
-        r = cffi.get(sportverse_url, headers={"User-Agent": UA, "Referer": "https://hubcloud.cx/"},
-                     timeout=8, impersonate="chrome", verify=False)
-        if r.status_code != 200:
+        html = fetch_html(sportverse_url, headers={'Referer': 'https://hubcloud.cx/'})
+        if not html:
+            return None
             return None
 
         matches = re.findall(
             r"https?://[a-z0-9-]+(?:\.[a-z0-9-]+)*\.workers\.dev/[^\"'<>\s]+(?:\s[^\"'<>]+)*",
-            r.text, re.IGNORECASE
+            html, re.IGNORECASE
         )
         if not matches:
             return None
@@ -109,13 +109,15 @@ def resolve_unblockedgames_sid(sid: str) -> Optional[Dict]:
 
         # Step 2: The SID is actually a redirect — fetch the unblockedgames page
         url = f"https://cloud.unblockedgames.world/?sid={sid}"
-        r = cffi.get(url, headers={"User-Agent": UA}, timeout=8, impersonate="chrome", verify=False)
-        if r.status_code != 200:
+        html = fetch_html(url)
+        if not html:
             return None
 
         # The page POSTs to itself with the SID to get the actual download URL
         # Try POST
-        r2 = cffi.post("https://cloud.unblockedgames.world/", data=f"_wp_http={sid}",
+        # For POST, use curl_cffi directly (Scrapling doesn't support POST well)
+        from curl_cffi import requests as _cffi
+        r2 = _cffi.post("https://cloud.unblockedgames.world/", data=f"_wp_http={sid}",
                        headers={"User-Agent": UA, "Content-Type": "application/x-www-form-urlencoded",
                                 "Referer": url},
                        timeout=8, impersonate="chrome", verify=False)
