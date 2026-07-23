@@ -197,3 +197,123 @@ async function runSource(source, target, title) {
 
 // Re-export for server.js
 export { streamCache as cache };
+
+// ---------------------------------------------------------------------------
+// CRITICAL: Synchronous scrape with hard timeout
+// ----------------------------------------------------------------------------
+// This is the function called by /stream endpoint on cache miss.
+// It runs all sources in parallel with p-limit(20) and returns whatever
+// streams are found within the timeout window.
+//
+// Key behavior:
+//   - Starts all 35 sources immediately (p-limit(20) throttles to 20 concurrent)
+//   - Waits up to `timeoutMs` (default 8000ms)
+//   - Returns streams collected so far (even if not all sources finished)
+//   - Does NOT wait for slow sources — returns partial results
+//
+// This is how PenguPlay works — Stremio shows "Fetching..." for 8 seconds,
+// then displays whatever streams were found.
+// ---------------------------------------------------------------------------
+export async function scrapeWithTimeout(type, id, timeoutMs = 8000) {
+  const startTotal = Date.now();
+  console.log(`\n[scrapeWithTimeout] === START ${type}/${id} (timeout: ${timeoutMs}ms) ===`);
+
+  // Parse ID and resolve metadata
+  const parsed = parseStremioId(id);
+  const targetType = type || parsed.type || 'movie';
+  const target = {
+    type: targetType,
+    imdbId: parsed.imdbId,
+    kitsuId: parsed.kitsuId,
+    malId: parsed.malId,
+    season: parsed.season,
+    episode: parsed.episode,
+  };
+
+  // Resolve title via Cinemeta/Kitsu (with 4s timeout)
+  let meta = null;
+  try {
+    meta = await Promise.race([
+      resolveMeta(target.imdbId || `kitsu:${target.kitsuId}` || `mal:${target.malId}`, targetType),
+      new Promise((r) => setTimeout(() => r(null), 4000)),
+    ]);
+  } catch {}
+
+  if (!meta || !meta.name) {
+    console.log(`[scrapeWithTimeout] no metadata for ${id}`);
+    return [];
+  }
+
+  const title = `${meta.name} ${meta.year || ''}`.trim();
+  console.log(`[scrapeWithTimeout] title: "${title}" (${meta.year || '?'})`);
+
+  // Resolve TMDB ID (with 3s timeout)
+  if (targetType !== 'movie') {
+    try {
+      const tmdbId = await Promise.race([
+        resolveTmdbId(target.imdbId, targetType, title),
+        new Promise((r) => setTimeout(() => r(null), 3000)),
+      ]);
+      if (tmdbId) {
+        target.tmdbId = tmdbId;
+        console.log(`[scrapeWithTimeout] TMDB: ${tmdbId}`);
+      }
+    } catch {}
+  }
+
+  // Filter sources by type
+  const applicableSources = SOURCES.filter((s) => {
+    if (s.types === 'all') return true;
+    if (Array.isArray(s.types)) return s.types.includes(targetType);
+    return s.types === targetType;
+  });
+
+  console.log(`[scrapeWithTimeout] running ${applicableSources.length} sources with concurrency=20`);
+
+  // Start ALL sources immediately with p-limit(20)
+  // Each source is wrapped to resolve individually
+  const sourcePromises = applicableSources.map((source) =>
+    limit(() => runSource(source, target, title))
+  );
+
+  // Create a promise that resolves after timeoutMs with whatever we have
+  // We collect streams as they come in, then return after timeout
+  const collectedStreams = [];
+  let resolvedCount = 0;
+
+  // Promise that resolves when ALL sources finish OR timeout hits
+  const allDone = Promise.allSettled(sourcePromises).then((results) => {
+    for (const r of results) {
+      if (r.status === 'fulfilled' && Array.isArray(r.value)) {
+        collectedStreams.push(...r.value);
+      }
+    }
+    return collectedStreams;
+  });
+
+  // Promise that resolves after timeoutMs
+  const timeoutPromise = new Promise((resolve) => {
+    setTimeout(() => {
+      console.log(`[scrapeWithTimeout] timeout hit at ${timeoutMs}ms — returning partial results`);
+      resolve(null);
+    }, timeoutMs);
+  });
+
+  // Wait for either all sources to finish OR timeout
+  await Promise.race([allDone, timeoutPromise]);
+
+  // Dedupe by URL
+  const seen = new Set();
+  const deduped = [];
+  for (const s of collectedStreams) {
+    if (s?.url && !seen.has(s.url)) {
+      seen.add(s.url);
+      deduped.push(s);
+    }
+  }
+
+  const elapsed = Date.now() - startTotal;
+  console.log(`[scrapeWithTimeout] === DONE in ${elapsed}ms: ${deduped.length} streams ===`);
+
+  return deduped;
+}

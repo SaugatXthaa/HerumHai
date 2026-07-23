@@ -23,7 +23,7 @@ import express from 'express';
 import cors from 'cors';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { triggerBackgroundScrape, streamCache, scrapeAllSources } from './src/scraper-orchestrator.js';
+import { triggerBackgroundScrape, streamCache, scrapeWithTimeout } from './src/scraper-orchestrator.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -59,37 +59,55 @@ app.get(['/manifest.json', '/manifest'], (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// CRITICAL: Stream endpoint — NEVER waits for scraping
+// CRITICAL: Stream endpoint — SYNCHRONOUS scraping with 8s timeout
 // ---------------------------------------------------------------------------
-// Cache HIT  → return streams instantly (<50ms)
-// Cache MISS → trigger background scrape, return [] instantly (<10ms)
+// Cache HIT  → return streams instantly (<50ms) + trigger background refresh
+// Cache MISS → scrape SYNCHRONOUSLY with 8s hard timeout
+//              - If streams found within 8s → return them immediately
+//              - If timeout hit → return whatever streams were found (even if 0)
+//              - Cache the result for subsequent requests
 //
-// This prevents Stremio's 10s "Failed to fetch" timeout.
-// User refreshes after 2-3s → cache is populated → streams appear.
+// This is the CORRECT architecture for Stremio:
+//   - Stremio CAN wait 8-10 seconds (it shows "Fetching..." during this time)
+//   - Stremio does NOT auto-refresh, so returning [] on first request is WRONG
+//   - We MUST return streams on the FIRST request, not []
 // ---------------------------------------------------------------------------
 app.get(['/stream/:type/:id.json', '/stream/:type/:id'], async (req, res) => {
   const start = Date.now();
   const { type, id } = req.params;
   const cleanId = String(id).replace(/\.json$/, '');
 
-  console.log(`[/stream] ${type}/${cleanId} — cache lookup...`);
+  console.log(`[/stream] ${type}/${cleanId} — request received`);
 
-  // Check cache
+  // Check cache first
   const cacheKey = `${type}:${cleanId}`;
   const cached = streamCache[cacheKey];
 
   if (cached && Array.isArray(cached.streams) && cached.streams.length > 0) {
     const elapsed = Date.now() - start;
     console.log(`[/stream] CACHE HIT — ${cached.streams.length} streams in ${elapsed}ms`);
+    // Return cached streams + trigger background refresh (so cache stays fresh)
+    triggerBackgroundScrape(type, cleanId);
     return res.json({ streams: cached.streams });
   }
 
-  // Cache miss — trigger background scrape (fire-and-forget, NO await)
-  console.log(`[/stream] CACHE MISS — triggering background scrape, returning [] instantly`);
-  triggerBackgroundScrape(type, cleanId);
+  // Cache miss — SCRAPE SYNCHRONOUSLY with 8s timeout
+  // Stremio shows "Fetching..." during this time, then displays the streams
+  console.log(`[/stream] CACHE MISS — scraping synchronously (8s timeout)...`);
+  const streams = await scrapeWithTimeout(type, cleanId, 8000);
+  const elapsed = Date.now() - start;
 
-  // Return empty array IMMEDIATELY — prevents Stremio timeout
-  return res.json({ streams: [] });
+  console.log(`[/stream] scrape complete — ${streams.length} streams in ${elapsed}ms`);
+
+  // Cache the result
+  streamCache[cacheKey] = {
+    streams,
+    scrapedAt: Date.now(),
+    hits: 0,
+    misses: 0,
+  };
+
+  return res.json({ streams });
 });
 
 // ---------------------------------------------------------------------------
@@ -121,7 +139,7 @@ app.get('/cache-status', (req, res) => {
 app.post('/cache-refresh/:type/:id', async (req, res) => {
   const { type, id } = req.params;
   console.log(`[manual-refresh] ${type}/${id}`);
-  const streams = await scrapeAllSources(type, id);
+  const streams = await scrapeWithTimeout(type, id, 15000);
   const cacheKey = `${type}:${id}`;
   streamCache[cacheKey] = {
     streams,
