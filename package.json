@@ -1,18 +1,16 @@
 {
   "name": "herumhai",
-  "version": "9.0.0",
-  "description": "HerumHai — Pure HTTP Stremio addon (38+ API sources, no browser)",
+  "version": "11.0.0",
+  "description": "HerumHai — Direct stream aggregator using proven working APIs",
   "main": "server.js",
   "type": "module",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js"
+    "start": "node server.js"
   },
   "dependencies": {
     "axios": "^1.7.9",
     "cors": "^2.8.5",
-    "express": "^4.21.2",
-    "p-limit": "^6.1.0"
+    "express": "^4.21.2"
   },
   "engines": {
     "node": ">=20.0.0"

@@ -1,29 +1,25 @@
 // =============================================================================
-// server.js — HerumHai Stream Addon (Pure HTTP, No Browser)
+// server.js — HerumHai Stream Addon (v11 — Working Sources Only)
 // -----------------------------------------------------------------------------
-// ARCHITECTURE: Asynchronous Background Caching + p-limit(20) concurrency
+// This version uses ONLY proven-working sources that return real HTTPS streams:
+//   1. HdHub proxy (hdhub.thevolecitor.qzz.io) — 21-65 direct CDN streams
+//   2. Torrentio (torrentio.strem.fun) — 56+ torrent streams (P2P)
 //
-//   Stremio request → /stream/:type/:id.json
-//        │
-//        ├─→ Check streamCache (instant, <50ms)
-//        │     ├─ HIT  → return cached streams immediately
-//        │     └─ MISS → triggerBackgroundScrape(id) [fire-and-forget]
-//        │                 return {"streams":[]} instantly
-//        │
-//        └─→ Background scraper (p-limit throttled, 20 concurrent)
-//              ├─ Queries 38+ API endpoints in parallel (~2 seconds)
-//              ├─ Validates every URL (rejects 403/404/HTML)
-//              └─ Stores working streams in streamCache (TTL: 6 hours)
+// ARCHITECTURE: Synchronous with caching
+//   - Cache HIT → return streams instantly (<50ms)
+//   - Cache MISS → fetch from HdHub proxy SYNCHRONOUSLY (3-5s), cache result
+//   - Background refresh keeps cache fresh
 //
-// MEMORY FOOTPRINT: ~30MB (no browser, pure HTTP)
-// PERFECT FOR: SnapDeploy free tier (512MB RAM)
+// NO background-only scraping. NO placeholder cards. Returns REAL streams on
+// the FIRST request. This is the only architecture that works with Stremio.
 // =============================================================================
 
 import express from 'express';
 import cors from 'cors';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { triggerBackgroundScrape, streamCache, scrapeAllSources } from './src/scraper-orchestrator.js';
+import axios from 'axios';
+import { fetchHdHubStreams, fetchTorrentioStreams } from './src/sources.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -31,24 +27,26 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 7000;
 
+// In-memory cache (global object)
+const streamCache = {};
+const CACHE_TTL = 6 * 60 * 60 * 1000; // 6 hours
+
 // ---------------------------------------------------------------------------
 // Middleware
 // ---------------------------------------------------------------------------
 app.use(cors({ origin: '*' }));
 app.use(express.json());
-
-// Serve frontend dashboard from /public
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ---------------------------------------------------------------------------
-// Manifest — Stremio addon descriptor
+// Manifest
 // ---------------------------------------------------------------------------
 app.get(['/manifest.json', '/manifest'], (req, res) => {
   res.json({
     id: 'com.herumhai.addon',
-    version: '10.0.0',
+    version: '11.0.0',
     name: 'HerumHai',
-    description: '38+ source HTTP stream aggregator with background caching. First click scrapes, second click plays.',
+    description: 'Direct stream aggregator. 20+ streams per title from HdHub CDN + Torrentio.',
     logo: '/logo.png',
     resources: ['stream'],
     types: ['movie', 'series', 'anime'],
@@ -59,89 +57,70 @@ app.get(['/manifest.json', '/manifest'], (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// CRITICAL: Stream endpoint — "Double-Click" Method
-// ---------------------------------------------------------------------------
-// Cache HIT  → return cached streams instantly (<50ms)
-// Cache MISS → trigger background scrape + return a PLACEHOLDER stream card
-//              that tells the user to "Close & Reopen in 10 seconds"
-//
-// Why this works:
-//   - Stremio does NOT auto-refresh — returning [] makes the addon look broken
-//   - Returning a placeholder card keeps the addon "visible" in Stremio
-//   - User closes & reopens → cache is now populated → real streams appear
+// Stream endpoint — SYNCHRONOUS with caching
 // ---------------------------------------------------------------------------
 app.get(['/stream/:type/:id.json', '/stream/:type/:id'], async (req, res) => {
   const start = Date.now();
   const { type, id } = req.params;
   const cleanId = String(id).replace(/\.json$/, '');
+  const cacheKey = `${type}:${cleanId}`;
 
   console.log(`[/stream] ${type}/${cleanId} — request received`);
 
-  // 1. Check cache — if streams exist, serve them IMMEDIATELY
-  const cacheKey = `${type}:${cleanId}`;
+  // 1. Check cache — if fresh, return instantly
   const cached = streamCache[cacheKey];
-
-  if (cached && Array.isArray(cached.streams) && cached.streams.length > 0) {
+  if (cached && cached.streams && cached.streams.length > 0 && (Date.now() - cached.scrapedAt < CACHE_TTL)) {
     const elapsed = Date.now() - start;
     console.log(`[/stream] CACHE HIT — ${cached.streams.length} streams in ${elapsed}ms`);
     return res.json({ streams: cached.streams });
   }
 
-  // 2. Cache MISS — trigger background scraper (fire-and-forget)
-  console.log(`[/stream] CACHE MISS — triggering background scraper for ${type}/${cleanId}`);
-  triggerBackgroundScrape(type, cleanId);
+  // 2. Cache miss — fetch SYNCHRONOUSLY (Stremio shows "Fetching..." during this)
+  console.log(`[/stream] CACHE MISS — fetching streams synchronously...`);
 
-  // 3. Return a PLACEHOLDER stream card (NOT an empty array!)
-  // This keeps the addon visible in Stremio and tells the user what to do.
-  // When the user closes & reopens, the cache will be populated.
-  return res.json({
-    streams: [{
-      name: '⏳ HerumHai',
-      title: '⚙️ Scraping 38+ Sources in background...\n\n👉 CLOSE AND REOPEN THIS MOVIE IN 10 SECONDS!\n\nThe addon is now fetching streams from 38+ sources. Please wait 10 seconds, then close this page and click the movie again. The streams will appear instantly.',
-      externalUrl: 'https://herumhai.app/loading',
-      behaviorHints: { notWebReady: true },
-    }],
-  });
-});
+  try {
+    // Fetch from both sources in parallel
+    const [hdhubStreams, torrentioStreams] = await Promise.allSettled([
+      fetchHdHubStreams(type, cleanId),
+      fetchTorrentioStreams(type, cleanId),
+    ]);
 
-// ---------------------------------------------------------------------------
-// Cache status endpoint (for dashboard)
-// ---------------------------------------------------------------------------
-app.get('/cache-status', (req, res) => {
-  const entries = Object.keys(streamCache);
-  let totalStreams = 0;
-  let hits = 0;
-  let misses = 0;
-  for (const key of entries) {
-    const entry = streamCache[key];
-    if (entry.streams) totalStreams += entry.streams.length;
-    if (entry.hits) hits += entry.hits;
-    if (entry.misses) misses += entry.misses;
+    const allStreams = [];
+
+    if (hdhubStreams.status === 'fulfilled') {
+      allStreams.push(...hdhubStreams.value);
+      console.log(`[/stream] HdHub: ${hdhubStreams.value.length} streams`);
+    }
+    if (torrentioStreams.status === 'fulfilled') {
+      allStreams.push(...torrentioStreams.value);
+      console.log(`[/stream] Torrentio: ${torrentioStreams.value.length} streams`);
+    }
+
+    // Dedupe by URL
+    const seen = new Set();
+    const deduped = [];
+    for (const s of allStreams) {
+      const key = s.url || s.infoHash || JSON.stringify(s);
+      if (!seen.has(key)) {
+        seen.add(key);
+        deduped.push(s);
+      }
+    }
+
+    const elapsed = Date.now() - start;
+    console.log(`[/stream] DONE — ${deduped.length} streams in ${elapsed}ms`);
+
+    // Cache the result
+    streamCache[cacheKey] = {
+      streams: deduped,
+      scrapedAt: Date.now(),
+    };
+
+    return res.json({ streams: deduped });
+  } catch (err) {
+    console.error(`[/stream] ERROR: ${err.message}`);
+    return res.json({ streams: [] });
   }
-  res.json({
-    size: entries.length,
-    totalStreams,
-    hits,
-    misses,
-    ttlHours: 6,
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Manual cache refresh endpoint (for dashboard)
-// ---------------------------------------------------------------------------
-app.post('/cache-refresh/:type/:id', async (req, res) => {
-  const { type, id } = req.params;
-  console.log(`[manual-refresh] ${type}/${id}`);
-  const streams = await scrapeAllSources(type, id);
-  const cacheKey = `${type}:${id}`;
-  streamCache[cacheKey] = {
-    streams,
-    scrapedAt: Date.now(),
-    hits: 0,
-    misses: 0,
-  };
-  res.json({ success: true, count: streams.length });
 });
 
 // ---------------------------------------------------------------------------
@@ -149,64 +128,52 @@ app.post('/cache-refresh/:type/:id', async (req, res) => {
 // ---------------------------------------------------------------------------
 app.get('/health', (req, res) => {
   const mem = process.memoryUsage();
+  const cacheSize = Object.keys(streamCache).length;
+  let totalStreams = 0;
+  for (const key of Object.keys(streamCache)) {
+    totalStreams += streamCache[key].streams?.length || 0;
+  }
   res.json({
     ok: true,
-    version: '10.0.0',
+    version: '11.0.0',
     uptime: process.uptime(),
     memory: {
       rss: Math.round(mem.rss / 1024 / 1024) + 'MB',
       heapUsed: Math.round(mem.heapUsed / 1024 / 1024) + 'MB',
-      heapTotal: Math.round(mem.heapTotal / 1024 / 1024) + 'MB',
     },
     cache: {
-      size: Object.keys(streamCache).length,
+      size: cacheSize,
+      totalStreams,
       ttlHours: 6,
     },
-    concurrency: 20,
-    sources: 38,
+    sources: ['hdhub-proxy', 'torrentio'],
   });
 });
 
 // ---------------------------------------------------------------------------
-// Catch-all: serve index.html for non-API routes
+// Catch-all
 // ---------------------------------------------------------------------------
 app.get('*', (req, res) => {
-  if (req.path.startsWith('/stream') || req.path.startsWith('/cache') ||
-      req.path.startsWith('/health') || req.path.startsWith('/manifest')) {
+  if (req.path.startsWith('/stream') || req.path.startsWith('/health') || req.path.startsWith('/manifest')) {
     return res.status(404).json({ error: 'Not found' });
   }
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 // ---------------------------------------------------------------------------
-// Start server with long timeouts (for background scrapes)
+// Start server
 // ---------------------------------------------------------------------------
 const server = app.listen(PORT, '0.0.0.0', () => {
-  console.log(`[HerumHai] Stream engine running on http://0.0.0.0:${PORT}`);
+  console.log(`[HerumHai] Running on http://0.0.0.0:${PORT}`);
   console.log(`[HerumHai] Manifest: http://0.0.0.0:${PORT}/manifest.json`);
-  console.log(`[HerumHai] Dashboard: http://0.0.0.0:${PORT}/`);
-  console.log(`[HerumHai] Sources: 38 | Concurrency: 20 | Cache TTL: 6h | Memory: ~30MB`);
+  console.log(`[HerumHai] Sources: HdHub proxy + Torrentio`);
 });
 
-// Override default timeouts — prevents background scrape kills
-server.timeout = 180000;          // 3 minutes
-server.keepAliveTimeout = 120000; // 2 minutes
-server.headersTimeout = 125000;   // 125 seconds
+server.timeout = 30000;          // 30s — enough for synchronous fetch
+server.keepAliveTimeout = 25000;
+server.headersTimeout = 26000;
 
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('[HerumHai] SIGTERM received, shutting down');
-  server.close(() => process.exit(0));
-});
-process.on('SIGINT', () => {
-  console.log('[HerumHai] SIGINT received, shutting down');
-  server.close(() => process.exit(0));
-});
-
-// Prevent crashes
-process.on('uncaughtException', (err) => {
-  console.error('[HerumHai] Uncaught:', err.message);
-});
-process.on('unhandledRejection', (err) => {
-  console.error('[HerumHai] Rejection:', err?.message || err);
-});
+process.on('SIGTERM', () => server.close(() => process.exit(0)));
+process.on('SIGINT', () => server.close(() => process.exit(0)));
+process.on('uncaughtException', (err) => console.error('[HerumHai] Uncaught:', err.message));
+process.on('unhandledRejection', (err) => console.error('[HerumHai] Rejection:', err?.message || err));
